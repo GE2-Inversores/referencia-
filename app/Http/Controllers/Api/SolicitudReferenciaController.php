@@ -272,7 +272,7 @@ class SolicitudReferenciaController extends Controller
         $this->notificarClinica(
             $solicitud,
             'Solicitud negada',
-            "La solicitud de {$solicitud->primer_nombre} {$solicitud->primer_apellido} fue negada. Motivo: {$validated['motivo_negacion']}.",
+            "La solicitud de {$solicitud->primer_nombre} {$solicitud->primer_apellido} fue negada. Revise el correo enviado para ver las observaciones.",
             'error',
         );
 
@@ -607,6 +607,16 @@ class SolicitudReferenciaController extends Controller
             ],
             'message' => "Se encontró ingreso #{$fila->admission_number} en Gomedisys. Confirme que es el paciente correcto.",
         ]);
+    }
+
+    /**
+     * Solicitud con todo lo que muestra el detalle (notas de seguimiento,
+     * soportes, diagnósticos, evoluciones). La vista reemplaza la fila con
+     * esta respuesta, así que debe venir completa como en index().
+     */
+    private function conRelaciones(SolicitudReferencia $solicitud): SolicitudReferencia
+    {
+        return $solicitud->load(['clinica', 'adjuntos', 'diagnosticos', 'eventos', 'evoluciones.adjuntos']);
     }
 
     /**

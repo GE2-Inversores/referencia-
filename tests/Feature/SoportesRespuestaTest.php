@@ -84,6 +84,47 @@ class SoportesRespuestaTest extends TestCase
         $this->assertSame('negado', $solicitud->fresh()->estado);
     }
 
+    public function test_denial_email_hides_internal_reason_and_shows_observations(): void
+    {
+        $solicitud = $this->solicitud('negado');
+        $solicitud->update([
+            'grupo_negacion' => 'poblacion_objeto',
+            'motivo_negacion' => 'No transladable',
+            'observaciones_respuesta' => 'Sin cupo por sobreocupación del servicio',
+            'nombre_quien_responde' => 'Super Administrador',
+            'hora_respuesta' => '10:00',
+        ]);
+
+        $html = view('emails.solicitud-negada', ['solicitud' => $solicitud->fresh('clinica')])->with('message', new class
+        {
+            public function embed(string $ruta): string
+            {
+                return 'cid:logo';
+            }
+        })->render();
+
+        $this->assertStringNotContainsString('Motivo de la negación', $html);
+        $this->assertStringNotContainsString('No transladable', $html);
+        $this->assertStringContainsString('Sin cupo por sobreocupación del servicio', $html);
+    }
+
+    public function test_no_arrival_email_keeps_the_no_admission_reason(): void
+    {
+        $solicitud = $this->solicitud('negado');
+        $solicitud->update(['motivo_negacion' => 'No ingreso: Alta Voluntaria']);
+
+        $html = view('emails.solicitud-negada', ['solicitud' => $solicitud->fresh('clinica')])->with('message', new class
+        {
+            public function embed(string $ruta): string
+            {
+                return 'cid:logo';
+            }
+        })->render();
+
+        $this->assertStringContainsString('Motivo de no ingreso', $html);
+        $this->assertStringContainsString('Alta Voluntaria', $html);
+    }
+
     public function test_more_than_five_supports_are_rejected(): void
     {
         Mail::fake();

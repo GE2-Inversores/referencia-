@@ -485,7 +485,17 @@
                       <p class="timeline-fecha">{{ paso.fecha }}</p>
                     </div>
                   </div>
-                  <p v-if="solicitudSeleccionada.observaciones_respuesta" class="timeline-obs">{{ solicitudSeleccionada.observaciones_respuesta }}</p>
+                  <div v-if="solicitudSeleccionada.observaciones_respuesta" class="notas-list">
+                    <p class="notas-list-title">Observaciones de la respuesta</p>
+                    <div class="nota-item">
+                      <div class="nota-item-head">
+                        <component :is="StickyNoteIcon" class="w-3 h-3 nota-item-icon" />
+                        <span class="nota-item-autor">{{ solicitudSeleccionada.nombre_quien_responde || 'Referencia' }}</span>
+                        <span v-if="solicitudSeleccionada.hora_respuesta" class="nota-item-fecha">{{ formatHora(solicitudSeleccionada.hora_respuesta) }}</span>
+                      </div>
+                      <p class="nota-item-texto">{{ solicitudSeleccionada.observaciones_respuesta }}</p>
+                    </div>
+                  </div>
                   <p v-if="solicitudSeleccionada.motivo_negacion" class="timeline-obs timeline-obs-negada"><template v-if="grupoNegacionLabel(solicitudSeleccionada.grupo_negacion)"><strong>{{ grupoNegacionLabel(solicitudSeleccionada.grupo_negacion) }}</strong> — </template>{{ solicitudSeleccionada.motivo_negacion }}</p>
                   <div v-if="notasSeguimiento.length" class="notas-list">
                     <p class="notas-list-title">Notas de seguimiento</p>
@@ -4052,6 +4062,7 @@ usePolling(() => {
   overflow-y: auto;
   scrollbar-width: thin;
 }
+.detalle-layout-side > .detalle-card { flex-shrink: 0; }
 .detalle-hc-card { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .detalle-hc-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .detalle-hc-box {

@@ -35,24 +35,22 @@
             </td>
           </tr>
 
-          <!-- Motivo de negación -->
+          <!-- Motivo de no ingreso: solo cuando el paciente no llegó. En una negación normal
+               el grupo/motivo es interno y la IPS solo ve las observaciones. -->
+          @if(str_starts_with((string) $solicitud->motivo_negacion, 'No ingreso:'))
           <tr>
             <td style="padding:28px 40px 0;">
               <table width="100%" cellpadding="0" cellspacing="0" style="background:#fef2f2;border:1px solid #fca5a5;border-radius:12px;">
                 <tr>
                   <td style="padding:18px 24px;">
-                    <p style="margin:0 0 6px;font-size:11px;font-weight:bold;color:#b91c1c;text-transform:uppercase;letter-spacing:1px;">Motivo de la negación</p>
-                    <p style="margin:0;font-size:14px;color:#7f1d1d;line-height:1.6;">
-                      @if($solicitud->grupo_negacion)
-                        <strong>{{ $solicitud->grupo_negacion === 'no_red' ? 'Paciente no RED' : 'Población objeto' }}</strong> —
-                      @endif
-                      {{ $solicitud->motivo_negacion }}
-                    </p>
+                    <p style="margin:0 0 6px;font-size:11px;font-weight:bold;color:#b91c1c;text-transform:uppercase;letter-spacing:1px;">Motivo de no ingreso</p>
+                    <p style="margin:0;font-size:14px;color:#7f1d1d;line-height:1.6;">{{ trim(substr((string) $solicitud->motivo_negacion, strlen('No ingreso:'))) }}</p>
                   </td>
                 </tr>
               </table>
             </td>
           </tr>
+          @endif
 
           <!-- Cuerpo -->
           <tr>
