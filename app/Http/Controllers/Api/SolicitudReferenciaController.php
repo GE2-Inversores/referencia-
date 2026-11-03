@@ -234,6 +234,8 @@ class SolicitudReferenciaController extends Controller
             'eps' => ['required', 'string', 'max:120'],
             'nombre_quien_responde' => ['required', 'string', 'max:200'],
             'observaciones_respuesta' => ['nullable', 'string'],
+            'soportes' => ['nullable', 'array', 'max:5'],
+            'soportes.*' => ['file', 'mimes:pdf,jpg,jpeg,png,gif,webp,bmp,tiff,svg,doc,docx,xls,xlsx,ppt,pptx,txt,csv,zip,rar', 'max:10240'],
         ]);
 
         $solicitud->update([
@@ -245,6 +247,16 @@ class SolicitudReferenciaController extends Controller
             'nombre_quien_responde' => $validated['nombre_quien_responde'],
             'observaciones_respuesta' => $validated['observaciones_respuesta'] ?? null,
         ]);
+
+        // Soportes de la negación (evidencia que adjunta quien responde).
+        foreach (($validated['soportes'] ?? []) as $soporte) {
+            $solicitud->adjuntos()->create([
+                'nombre_original' => $soporte->getClientOriginalName(),
+                'ruta' => $soporte->store("solicitudes-referencia/{$solicitud->id}", 'local'),
+                'mime_type' => $soporte->getMimeType(),
+                'tamano' => $soporte->getSize(),
+            ]);
+        }
 
         $solicitud->load('clinica');
 

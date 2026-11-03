@@ -30,7 +30,7 @@
     </div>
 
     <!-- ── Contenido: columna izquierda (chips + filtros + tabla) + panel lateral ── -->
-    <div class="flex-1 flex gap-2 min-h-0 overflow-hidden">
+    <div class="sol-body flex gap-2 min-h-0 overflow-hidden">
     <div class="flex-1 min-w-0 flex flex-col gap-2 min-h-0">
 
       <div class="sol-list-toolbar shrink-0">
@@ -109,6 +109,22 @@
           </Transition>
         </div>
       </div>
+
+    <!-- ── Pestañas rápidas por estado ── -->
+    <div class="sol-tabs" role="tablist" aria-label="Filtrar por estado">
+      <button type="button" class="sol-tab" role="tab" :class="{ 'sol-tab-active': tabActiva === 'todas' }" :aria-selected="tabActiva === 'todas'" @click="cambiarTab('todas')">
+        Todas <span class="sol-tab-count">{{ resumen.total }}</span>
+      </button>
+      <button type="button" class="sol-tab sol-tab-pendiente" role="tab" :class="{ 'sol-tab-active': tabActiva === 'pendiente' }" :aria-selected="tabActiva === 'pendiente'" @click="cambiarTab('pendiente')">
+        <span class="sol-tab-dot"></span> Nueva solicitud <span class="sol-tab-count">{{ resumen.pendientes }}</span>
+      </button>
+      <button type="button" class="sol-tab sol-tab-pendiente-cama" role="tab" :class="{ 'sol-tab-active': tabActiva === 'pendiente_cama' }" :aria-selected="tabActiva === 'pendiente_cama'" @click="cambiarTab('pendiente_cama')">
+        <span class="sol-tab-dot"></span> Pendiente <span class="sol-tab-count">{{ resumen.pendientesCama }}</span>
+      </button>
+      <button type="button" class="sol-tab sol-tab-en-espera" role="tab" :class="{ 'sol-tab-active': tabActiva === 'en_espera' }" :aria-selected="tabActiva === 'en_espera'" @click="cambiarTab('en_espera')">
+        <span class="sol-tab-dot"></span> En espera <span class="sol-tab-count">{{ resumen.enEspera }}</span>
+      </button>
+    </div>
 
     <!-- ── Listado de referencias ── -->
     <div class="flex-1 min-h-0 overflow-hidden sol-list-panel">
@@ -879,6 +895,29 @@
                   <el-input v-model="formNegar.motivo_negacion" type="textarea" :rows="3" placeholder="Indique el motivo..." />
                 </div>
                 <p v-else class="negar-grupo-hint">Selecciona el grupo para habilitar el motivo de negación.</p>
+                <div class="negar-attach">
+                  <input
+                    ref="soportesNegarInput"
+                    type="file"
+                    class="hidden"
+                    multiple
+                    accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.svg,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar"
+                    @change="agregarSoportesNegar"
+                  />
+                  <button type="button" class="sol-attach-btn" @click="soportesNegarInput?.click()">
+                    <component :is="PaperclipIcon" class="w-3.5 h-3.5" /> Adjuntar soporte
+                  </button>
+                  <span class="sol-attach-hint">Imágenes o PDF de evidencia · hasta 5 de 10 MB</span>
+                  <div v-if="soportesNegar.length" class="sol-attach-list">
+                    <span v-for="(archivo, i) in soportesNegar" :key="`${archivo.name}-${i}`" class="sol-attach-chip">
+                      <component :is="PaperclipIcon" class="w-3 h-3" />
+                      <span class="sol-attach-name" :title="archivo.name">{{ archivo.name }}</span>
+                      <button type="button" class="sol-attach-del" aria-label="Quitar archivo" @click="soportesNegar.splice(i, 1)">
+                        <component :is="XIcon" class="w-3 h-3" />
+                      </button>
+                    </span>
+                  </div>
+                </div>
                 <div>
                   <label class="accion-field-label">Observaciones adicionales</label>
                   <el-input v-model="formNegar.observaciones_respuesta" type="textarea" :rows="2" placeholder="Opcional" />
@@ -1410,6 +1449,8 @@ const modalEvoluciones = ref(false);
 
 const modalAceptar = ref(false);
 const modalNegar = ref(false);
+const soportesNegar = ref<File[]>([]);
+const soportesNegarInput = ref<HTMLInputElement | null>(null);
 const modalPdf = ref(false);
 const solicitudSeleccionada = ref<Solicitud | null>(null);
 const enviandoGomedisysId = ref<number | null>(null);
@@ -1448,6 +1489,7 @@ const MOTIVOS_NEGACION_POBLACION = [
   'Exclusión del PGP',
   'No transladable',
   'Sin respuesta por parte de intensivista',
+  'Paciente no comentado por la EPS',
 ];
 
 function seleccionarGrupoNegacion(grupo: 'no_red' | 'poblacion_objeto') {
@@ -2539,7 +2581,25 @@ function abrirNegar(s: Solicitud) {
     nombre_quien_responde: authStore.user?.full_name ?? '',
     observaciones_respuesta: '',
   };
+  soportesNegar.value = [];
   modalNegar.value = true;
+}
+
+function agregarSoportesNegar(event: Event): void {
+  const input = event.target as HTMLInputElement;
+  const archivos = [...(input.files ?? [])];
+  input.value = '';
+  for (const archivo of archivos) {
+    if (soportesNegar.value.length >= 5) {
+      notify.warning('Máximo 5 soportes');
+      break;
+    }
+    if (archivo.size > 10 * 1024 * 1024) {
+      notify.warning(`"${archivo.name}" supera los 10 MB`);
+      continue;
+    }
+    soportesNegar.value.push(archivo);
+  }
 }
 
 async function aceptar() {
@@ -2569,7 +2629,12 @@ async function negar() {
   }
   try {
     procesando.value = true;
-    const { data } = await http.post(`/api/solicitudes-referencia/${solicitudSeleccionada.value!.id}/negar`, formNegar.value);
+    const body = new FormData();
+    Object.entries(formNegar.value).forEach(([campo, valor]) => body.append(campo, valor ?? ''));
+    soportesNegar.value.forEach((soporte) => body.append('soportes[]', soporte));
+    const { data } = await http.post(`/api/solicitudes-referencia/${solicitudSeleccionada.value!.id}/negar`, body, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
     notify.success('Solicitud negada');
     const idx = solicitudes.value.findIndex(s => s.id === solicitudSeleccionada.value!.id);
     if (idx !== -1) solicitudes.value[idx] = data.data;
@@ -3253,6 +3318,28 @@ usePolling(() => {
 
 /* ── Panel desplegable de filtros (abre el botón "Filtros") ── */
 .sol-filtros-wrap { position: relative; }
+.sol-tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: -2px 0 6px; }
+.sol-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border: 1px solid #dbe5f5; border-radius: 999px;
+  background: rgba(255,255,255,.75); color: #3f5d84;
+  font-size: 11px; font-weight: 700; cursor: pointer;
+  transition: all .15s ease; font-family: inherit;
+}
+.sol-tab:hover { border-color: #93b9f5; background: #f0f6ff; color: #16468E; }
+.sol-tab-active { border-color: #16468E; background: #16468E; color: #fff; box-shadow: 0 4px 12px rgba(22,70,142,.28); }
+.sol-tab-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.sol-tab-pendiente .sol-tab-dot { background: #d9a028; }
+.sol-tab-pendiente-cama .sol-tab-dot { background: #f07d22; }
+.sol-tab-en-espera .sol-tab-dot { background: #4d8ef7; }
+.sol-tab-active .sol-tab-dot { background: #fff; }
+.sol-tab-count { padding: 1px 7px; border-radius: 999px; background: rgba(22,70,142,.1); font-size: 9.5px; font-weight: 800; }
+.sol-tab-active .sol-tab-count { background: rgba(255,255,255,.22); }
+.dark .sol-tab { border-color: #314666; background: #1c2d46; color: #bcd1ef; }
+.dark .sol-tab:hover { border-color: #4d8ef7; color: #e2ecfc; }
+.dark .sol-tab-active { border-color: #4d8ef7; background: #1f3d69; color: #e2ecfc; }
+.dark .sol-tab-count { background: rgba(255,255,255,.1); }
+.dark .sol-tab-active .sol-tab-count { background: rgba(255,255,255,.16); }
 .sol-filtros-badge {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 15px; height: 15px; padding: 0 4px;
@@ -3320,8 +3407,9 @@ usePolling(() => {
 .sol-list-tools button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 30px; padding: 6px 9px; border: 1px solid #dbe6f5; border-radius: 7px; background: rgba(255,255,255,.8); color: #315583; font-size: 11px; white-space: nowrap; cursor: pointer; transition: background .15s ease, border-color .15s ease; }
 .sol-list-tools button:hover:not(:disabled) { background: #e4efff; }
 .sol-list-tools button:disabled { opacity: .5; cursor: not-allowed; }
+.sol-body { flex: 0 1 auto; }
 .sol-list-panel { display: flex; flex-direction: column; container-type: inline-size; }
-.sol-reference-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 2px 3px 3px 1px; }
+.sol-reference-scroll { flex: 0 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 2px 3px 3px 1px; }
 .sol-reference-list { display: flex; flex-direction: column; gap: 8px; }
 .sol-reference-card {
   display: grid;
@@ -4510,6 +4598,32 @@ usePolling(() => {
 .dark .evoluciones-adjunto:hover { background: #1f3d69; border-color: #4771ab; }
 .dark .evoluciones-adjunto small { color: #7d95bb; }
 .evoluciones-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px 18px; color: #94a3b8; text-align: center; }
+.negar-attach { margin: 4px 0 8px; }
+.sol-attach-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border: 1.5px dashed #a9ccff; border-radius: 9px;
+  background: #f2f8ff; color: #0754b5; font-size: 11px; font-weight: 800;
+  cursor: pointer; transition: all .15s ease;
+}
+.sol-attach-btn:hover { background: #e4f0ff; border-color: #5b9dff; }
+.sol-attach-hint { margin-left: 8px; color: #90a6c4; font-size: 9.5px; }
+.sol-attach-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.sol-attach-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  padding: 4px 8px; border: 1px solid #d4e2f5; border-radius: 8px;
+  background: #fff; color: #2d4a73; font-size: 10.5px; font-weight: 600;
+}
+.sol-attach-name { overflow: hidden; max-width: 180px; text-overflow: ellipsis; white-space: nowrap; }
+.sol-attach-del {
+  display: grid; place-items: center; width: 16px; height: 16px; flex-shrink: 0;
+  border: 0; border-radius: 50%; background: #fee2e2; color: #dc2626; cursor: pointer;
+}
+.sol-attach-del:hover { background: #fecaca; }
+.dark .sol-attach-btn { border-color: #31527c; background: #172b47; color: #93c5fd; }
+.dark .sol-attach-btn:hover { border-color: #4d8ef7; background: #1e3a5f; }
+.dark .sol-attach-hint { color: #6d84a8; }
+.dark .sol-attach-chip { border-color: #314666; background: #1c2d46; color: #bcd5f7; }
+.dark .sol-attach-del { background: #4c1d24; color: #fda4af; }
 .evoluciones-empty > svg { color: #60a5fa; }
 .evoluciones-empty strong { color: #334155; font-size: .84rem; }
 .evoluciones-empty span { max-width: 320px; font-size: .68rem; line-height: 1.5; }
