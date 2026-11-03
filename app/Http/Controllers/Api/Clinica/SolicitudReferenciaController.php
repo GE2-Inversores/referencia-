@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Clinica;
 use App\Http\Controllers\Controller;
 use App\Mail\NuevaEvolucionPaciente;
 use App\Mail\NuevaSolicitudReferenciaInterna;
+use App\Mail\SolicitudRecibida;
 use App\Models\CiudadGomedisys;
 use App\Models\Clinica;
 use App\Models\ClinicaSession;
@@ -334,7 +335,7 @@ class SolicitudReferenciaController extends Controller
                 $institucion = $clinica?->nombre ?? $validated['institucion_remitente'] ?? 'Entidad externa';
                 $paciente = trim("{$validated['primer_nombre']} {$validated['primer_apellido']}");
                 $this->notificarUsuarios(
-                    titulo: 'Nueva solicitud de referencia',
+                    titulo: '🏥Nueva solicitud de referencia',
                     mensaje: "La institución \"{$institucion}\" solicita referencia para el paciente {$paciente} — {$validated['especialidad_requerida']}.",
                     tipo: 'warning',
                     link: "/solicitudes-referencia?resaltar={$solicitud->id}",
@@ -378,6 +379,21 @@ class SolicitudReferenciaController extends Controller
             return response()->json([
                 'message' => 'No se pudo enviar el correo de notificación. La solicitud no se registró; intente enviarla nuevamente.',
             ], 503);
+        }
+
+        // Confirmación a la clínica: va por fuera de la transacción — si el
+        // correo de la clínica falla, la solicitud ya registrada se conserva.
+        $correoClinica = $solicitud->correoNotificacion();
+
+        if ($correoClinica && self::correoValido($correoClinica)) {
+            try {
+                Mail::to($correoClinica)->send(new SolicitudRecibida($solicitud));
+            } catch (Throwable $exception) {
+                Log::warning('No se pudo enviar la confirmación de recepción a la clínica', [
+                    'solicitud_id' => $solicitud->id,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
         }
 
         return response()->json(['data' => $solicitud, 'message' => 'Solicitud enviada correctamente'], 201);

@@ -17,7 +17,7 @@ class CorreoPrueba extends Mailable
     {
         return new Envelope(
             replyTo: [new Address(config('mail.referencia_interna'), config('mail.referencia_nombre'))],
-            subject: 'Correo de prueba — Sistema de Referencia Santa Bárbara',
+            subject: '🏥 Correo de prueba — Sistema de Referencia Santa Bárbara',
         );
     }
 
