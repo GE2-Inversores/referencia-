@@ -6,6 +6,7 @@ use App\Models\SolicitudEvolucion;
 use App\Models\SolicitudReferencia;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
+use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
@@ -27,6 +28,7 @@ class NuevaEvolucionPaciente extends Mailable
         $institucion = $this->solicitud->clinica?->nombre ?? $this->solicitud->institucion_remitente ?? 'Entidad externa';
 
         return new Envelope(
+            replyTo: [new Address(config('mail.referencia_interna'), config('mail.referencia_nombre'))],
             subject: 'Evolución registrada — '.$institucion.' · '.$this->solicitud->primer_nombre.' '.$this->solicitud->primer_apellido.' (ID'.str_pad((string) $this->solicitud->id, 6, '0', STR_PAD_LEFT).')',
         );
     }

@@ -64,7 +64,7 @@ class UserFactory extends Factory
             'middle_name' => null,
             'last_name' => 'Administrador',
             'sur_name' => null,
-            'email' => 'superadmin@example.com',
+            'email' => env('SUPERADMIN_EMAIL', 'superadmin@example.com'),
             'job_title' => 'Super administrador',
             'must_change_password' => true,
             'must_update_profile' => true,

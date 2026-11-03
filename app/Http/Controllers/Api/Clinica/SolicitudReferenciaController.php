@@ -28,6 +28,46 @@ class SolicitudReferenciaController extends Controller
 {
     public function __construct(private NominatimGeocodingService $geocoding) {}
 
+    /**
+     * Destinatarios de las notificaciones internas (nueva solicitud, nueva
+     * evolución). Si MAIL_REFERENCIA_INTERNA está definida en el .env se
+     * envía SOLO a ese correo; si no, a los usuarios activos con permiso
+     * clinicas.view, descartando correos inválidos o de dominios de prueba
+     * (un solo destinatario inválido hace que el servidor rechace todo).
+     *
+     * @return array<int, string>
+     */
+    private function destinatariosInternos(): array
+    {
+        $correoFijo = trim((string) config('mail.referencia_interna', ''));
+
+        if ($correoFijo !== '' && self::correoValido($correoFijo)) {
+            return [$correoFijo];
+        }
+
+        $destinatarios = User::permission('clinicas.view')
+            ->where('is_active', true)
+            ->whereNotNull('email')
+            ->pluck('email')
+            ->all();
+
+        $destinatarios = array_values(array_filter($destinatarios, fn (string $correo): bool => self::correoValido($correo)));
+
+        return $destinatarios !== []
+            ? $destinatarios
+            : [config('mail.referencia_interna')];
+    }
+
+    /** Correo con formato válido y sin dominios reservados para pruebas (example.*, *.test). */
+    private static function correoValido(string $correo): bool
+    {
+        if (! filter_var($correo, FILTER_VALIDATE_EMAIL)) {
+            return false;
+        }
+
+        return ! preg_match('/@(example\.(com|net|org)|[^.]+\.test)$/i', $correo);
+    }
+
     private function getClinicaId(Request $request): ?int
     {
         $token = $request->bearerToken() ?? $request->header('X-Clinica-Token');
@@ -300,15 +340,7 @@ class SolicitudReferenciaController extends Controller
                     link: "/solicitudes-referencia?resaltar={$solicitud->id}",
                 );
 
-                $destinatarios = User::permission('clinicas.view')
-                    ->where('is_active', true)
-                    ->whereNotNull('email')
-                    ->pluck('email')
-                    ->all();
-
-                if ($destinatarios === []) {
-                    $destinatarios = [config('mail.referencia_interna', env('MAIL_REFERENCIA_INTERNA', 'referencia@cacsantabarbara.co'))];
-                }
+                $destinatarios = $this->destinatariosInternos();
 
                 $solicitud->load(['adjuntos', 'eventos', 'diagnosticos']);
 
@@ -478,15 +510,7 @@ class SolicitudReferenciaController extends Controller
         // notificación de nueva solicitud. Si el correo falla no se bloquea
         // el registro de la nota (ya quedó guardada arriba).
         try {
-            $destinatarios = User::permission('clinicas.view')
-                ->where('is_active', true)
-                ->whereNotNull('email')
-                ->pluck('email')
-                ->all();
-
-            if ($destinatarios === []) {
-                $destinatarios = [config('mail.referencia_interna', env('MAIL_REFERENCIA_INTERNA', 'referencia@cacsantabarbara.co'))];
-            }
+            $destinatarios = $this->destinatariosInternos();
 
             Mail::to($destinatarios)->send(new NuevaEvolucionPaciente($solicitud->load('clinica'), $evolucion));
         } catch (Throwable $e) {

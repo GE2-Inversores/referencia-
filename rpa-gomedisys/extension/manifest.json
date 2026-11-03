@@ -15,7 +15,9 @@
         "http://localhost:8020/*",
         "http://localhost:5173/*",
         "http://referencia.test/*",
-        "https://referencia.test/*"
+        "https://referencia.test/*",
+        "https://referencia.cacsb.net/*",
+        "http://referencia.cacsb.net/*"
       ],
       "js": ["content-bridge.js"],
       "run_at": "document_idle"

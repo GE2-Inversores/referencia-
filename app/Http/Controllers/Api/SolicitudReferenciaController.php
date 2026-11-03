@@ -109,6 +109,7 @@ class SolicitudReferenciaController extends Controller
                     ['solicitud' => $solicitud],
                     function ($message) use ($solicitud) {
                         $message->to($solicitud->correoNotificacion())
+                            ->replyTo(config('mail.referencia_interna'), config('mail.referencia_nombre'))
                             ->subject("Solicitud de referencia ACEPTADA - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                     }
                 );
@@ -153,6 +154,7 @@ class SolicitudReferenciaController extends Controller
                 ['solicitud' => $solicitud],
                 function ($message) use ($solicitud) {
                     $message->to($solicitud->correoNotificacion())
+                        ->replyTo(config('mail.referencia_interna'), config('mail.referencia_nombre'))
                         ->subject("Solicitud de referencia ACEPTADA - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                 }
             );
@@ -252,6 +254,7 @@ class SolicitudReferenciaController extends Controller
                 ['solicitud' => $solicitud],
                 function ($message) use ($solicitud) {
                     $message->to($solicitud->correoNotificacion())
+                        ->replyTo(config('mail.referencia_interna'), config('mail.referencia_nombre'))
                         ->subject("Solicitud de referencia NEGADA - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                 }
             );
@@ -341,6 +344,7 @@ class SolicitudReferenciaController extends Controller
                 ],
                 function ($message) use ($solicitud) {
                     $message->to($solicitud->correoNotificacion())
+                        ->replyTo(config('mail.referencia_interna'), config('mail.referencia_nombre'))
                         ->subject("Cambio de estado en su solicitud - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                 }
             );
@@ -470,6 +474,7 @@ class SolicitudReferenciaController extends Controller
                 ['solicitud' => $solicitud],
                 function ($message) use ($solicitud) {
                     $message->to($solicitud->correoNotificacion())
+                        ->replyTo(config('mail.referencia_interna'), config('mail.referencia_nombre'))
                         ->subject("Solicitud de referencia COMPLETADA - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                 }
             );
@@ -532,6 +537,7 @@ class SolicitudReferenciaController extends Controller
                 ['solicitud' => $solicitud],
                 function ($message) use ($solicitud) {
                     $message->to($solicitud->correoNotificacion())
+                        ->replyTo(config('mail.referencia_interna'), config('mail.referencia_nombre'))
                         ->subject("Solicitud de referencia NEGADA - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                 }
             );

@@ -66,7 +66,7 @@ class LoginExternoController extends Controller
         Mail::to($clinica->email)->send(new ClinicaRegistroConfirmacion($clinica));
 
         // Notificación interna al equipo de referencia (correo)
-        $correoReferencia = config('mail.referencia_interna', env('MAIL_REFERENCIA_INTERNA', 'referencia@cacsantabarbara.co'));
+        $correoReferencia = config('mail.referencia_interna');
         Mail::to($correoReferencia)->send(new ClinicaRegistroNotificacionInterna($clinica));
 
         // Notificación en campana para usuarios con permiso clinicas.view

@@ -115,4 +115,16 @@ return [
         'name' => env('MAIL_FROM_NAME', env('APP_NAME', 'Laravel')),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Correo interno de referencia
+    |--------------------------------------------------------------------------
+    |
+    | Destinatario de los avisos internos (nueva solicitud, nueva evolución)
+    | y dirección Reply-To de los correos que salen hacia las clínicas.
+    |
+    */
+    'referencia_interna' => env('MAIL_REFERENCIA_INTERNA', 'referencia@cacsantabarbara.co'),
+    'referencia_nombre' => env('MAIL_REFERENCIA_NOMBRE', 'Referencia CACSB'),
+
 ];
