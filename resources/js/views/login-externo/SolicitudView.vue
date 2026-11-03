@@ -1058,7 +1058,7 @@ const CAMPO_LABELS: Record<string, string> = {
 };
 
 const MAX_ARCHIVO_MB = 10;
-const MAX_ARCHIVOS = 2;
+const MAX_ARCHIVOS = 10;
 
 function seleccionarAdjuntos(event: Event) {
   const files = Array.from((event.target as HTMLInputElement).files ?? []);
