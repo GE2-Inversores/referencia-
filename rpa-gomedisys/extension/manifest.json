@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Autocompletar Gomedisys — Referencia",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Diligencia el formulario de Registro de Referencia en Gomedisys con los datos de una solicitud ya aceptada en la aplicación de referencia. No toca login ni reCAPTCHA — usa la pestaña de Gomedisys que ya tienes abierta y logueada.",
   "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" },
   "permissions": ["tabs", "scripting", "storage"],
