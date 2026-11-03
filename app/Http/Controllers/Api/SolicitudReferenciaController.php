@@ -13,6 +13,7 @@ use App\Services\SqlQueryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\Rule;
@@ -81,7 +82,11 @@ class SolicitudReferenciaController extends Controller
             // valida/corrige y queda guardada en la solicitud.
             'eps' => ['required', 'string', 'max:120'],
             'observaciones_respuesta' => ['nullable', 'string'],
+            'soportes' => ['nullable', 'array', 'max:5'],
+            'soportes.*' => ['file', 'mimes:pdf,jpg,jpeg,png,gif,webp,bmp,tiff,svg,doc,docx,xls,xlsx,ppt,pptx,txt,csv,zip,rar', 'max:10240'],
         ]);
+
+        $this->guardarSoportes($solicitud, $validated['soportes'] ?? []);
 
         if ($sinDisponibilidad) {
             // Aceptada en espera de cupo: queda "pendiente" hasta que haya
@@ -248,15 +253,7 @@ class SolicitudReferenciaController extends Controller
             'observaciones_respuesta' => $validated['observaciones_respuesta'] ?? null,
         ]);
 
-        // Soportes de la negación (evidencia que adjunta quien responde).
-        foreach (($validated['soportes'] ?? []) as $soporte) {
-            $solicitud->adjuntos()->create([
-                'nombre_original' => $soporte->getClientOriginalName(),
-                'ruta' => $soporte->store("solicitudes-referencia/{$solicitud->id}", 'local'),
-                'mime_type' => $soporte->getMimeType(),
-                'tamano' => $soporte->getSize(),
-            ]);
-        }
+        $this->guardarSoportes($solicitud, $validated['soportes'] ?? []);
 
         $solicitud->load('clinica');
 
@@ -610,6 +607,24 @@ class SolicitudReferenciaController extends Controller
             ],
             'message' => "Se encontró ingreso #{$fila->admission_number} en Gomedisys. Confirme que es el paciente correcto.",
         ]);
+    }
+
+    /**
+     * Guarda como soportes de la solicitud los archivos que adjunta quien
+     * responde (aceptar, negar) — quedan visibles en el detalle.
+     *
+     * @param  array<int, UploadedFile>  $soportes
+     */
+    private function guardarSoportes(SolicitudReferencia $solicitud, array $soportes): void
+    {
+        foreach ($soportes as $soporte) {
+            $solicitud->adjuntos()->create([
+                'nombre_original' => $soporte->getClientOriginalName(),
+                'ruta' => $soporte->store("solicitudes-referencia/{$solicitud->id}", 'local'),
+                'mime_type' => $soporte->getMimeType(),
+                'tamano' => $soporte->getSize(),
+            ]);
+        }
     }
 
     private function notificarClinica(SolicitudReferencia $solicitud, string $titulo, string $mensaje, string $tipo = 'info'): void

@@ -797,6 +797,29 @@
                   <label class="accion-field-label">Observaciones</label>
                   <el-input v-model="formAceptar.observaciones_respuesta" type="textarea" :rows="2" placeholder="Opcional" />
                 </div>
+                <div class="negar-attach">
+                  <input
+                    ref="soportesAceptarInput"
+                    type="file"
+                    class="hidden"
+                    multiple
+                    accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.svg,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar"
+                    @change="agregarSoportesAceptar"
+                  />
+                  <button type="button" class="sol-attach-btn" @click="soportesAceptarInput?.click()">
+                    <component :is="PaperclipIcon" class="w-3.5 h-3.5" /> Adjuntar soporte
+                  </button>
+                  <span class="sol-attach-hint">Imágenes o PDF · hasta 5 de 10 MB</span>
+                  <div v-if="soportesAceptar.length" class="sol-attach-list">
+                    <span v-for="(archivo, i) in soportesAceptar" :key="`${archivo.name}-${i}`" class="sol-attach-chip">
+                      <component :is="PaperclipIcon" class="w-3 h-3" />
+                      <span class="sol-attach-name" :title="archivo.name">{{ archivo.name }}</span>
+                      <button type="button" class="sol-attach-del" aria-label="Quitar archivo" @click="soportesAceptar.splice(i, 1)">
+                        <component :is="XIcon" class="w-3 h-3" />
+                      </button>
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1260,7 +1283,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, watch, nextTick, type Ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { usePolling } from '@/lib/usePolling';
 import { actualizarSiCambio } from '@/lib/silentRefresh';
@@ -1451,6 +1474,8 @@ const modalAceptar = ref(false);
 const modalNegar = ref(false);
 const soportesNegar = ref<File[]>([]);
 const soportesNegarInput = ref<HTMLInputElement | null>(null);
+const soportesAceptar = ref<File[]>([]);
+const soportesAceptarInput = ref<HTMLInputElement | null>(null);
 const modalPdf = ref(false);
 const solicitudSeleccionada = ref<Solicitud | null>(null);
 const enviandoGomedisysId = ref<number | null>(null);
@@ -2360,6 +2385,7 @@ function abrirAceptar(s: Solicitud) {
     lugar_llegada: '',
     observaciones_respuesta: '',
   };
+  soportesAceptar.value = [];
   modalAceptar.value = true;
 }
 
@@ -2585,12 +2611,12 @@ function abrirNegar(s: Solicitud) {
   modalNegar.value = true;
 }
 
-function agregarSoportesNegar(event: Event): void {
+function agregarSoportes(destino: Ref<File[]>, event: Event): void {
   const input = event.target as HTMLInputElement;
   const archivos = [...(input.files ?? [])];
   input.value = '';
   for (const archivo of archivos) {
-    if (soportesNegar.value.length >= 5) {
+    if (destino.value.length >= 5) {
       notify.warning('Máximo 5 soportes');
       break;
     }
@@ -2598,9 +2624,12 @@ function agregarSoportesNegar(event: Event): void {
       notify.warning(`"${archivo.name}" supera los 10 MB`);
       continue;
     }
-    soportesNegar.value.push(archivo);
+    destino.value.push(archivo);
   }
 }
+
+const agregarSoportesNegar = (event: Event) => agregarSoportes(soportesNegar, event);
+const agregarSoportesAceptar = (event: Event) => agregarSoportes(soportesAceptar, event);
 
 async function aceptar() {
   if (!formAceptar.value.hora_respuesta || !formAceptar.value.nombre_quien_responde.trim() || !formAceptar.value.eps
@@ -2610,7 +2639,12 @@ async function aceptar() {
   }
   try {
     procesando.value = true;
-    const { data } = await http.post(`/api/solicitudes-referencia/${solicitudSeleccionada.value!.id}/aceptar`, formAceptar.value);
+    const body = new FormData();
+    Object.entries(formAceptar.value).forEach(([campo, valor]) => body.append(campo, typeof valor === 'boolean' ? (valor ? '1' : '0') : String(valor ?? '')));
+    soportesAceptar.value.forEach((soporte) => body.append('soportes[]', soporte));
+    const { data } = await http.post(`/api/solicitudes-referencia/${solicitudSeleccionada.value!.id}/aceptar`, body, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
     notify.success(data.message || 'Solicitud aceptada');
     const idx = solicitudes.value.findIndex(s => s.id === solicitudSeleccionada.value!.id);
     if (idx !== -1) solicitudes.value[idx] = data.data;
