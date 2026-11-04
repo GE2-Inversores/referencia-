@@ -97,7 +97,8 @@ class SolicitudReferenciaController extends Controller
         $solicitudes = SolicitudReferencia::where('clinica_id', $clinicaId)
             ->with(['adjuntos', 'eventos', 'diagnosticos'])
             ->orderBy('created_at', 'desc')
-            ->get();
+            ->get()
+            ->makeHidden(['grupo_negacion', 'motivo_negacion']);
 
         return response()->json(['data' => $solicitudes]);
     }
@@ -556,7 +557,8 @@ class SolicitudReferenciaController extends Controller
 
         $solicitud = SolicitudReferencia::where('clinica_id', $clinicaId)
             ->with(['adjuntos', 'eventos', 'diagnosticos'])
-            ->findOrFail($id);
+            ->findOrFail($id)
+            ->makeHidden(['grupo_negacion', 'motivo_negacion']);
 
         return response()->json(['data' => $solicitud]);
     }
