@@ -1207,10 +1207,7 @@ async function guardar() {
   }
   guardando.value = true;
   try {
-    const now = new Date();
     const payload = new FormData();
-    payload.append('fecha', now.toISOString().slice(0, 10));
-    payload.append('hora', now.toTimeString().slice(0, 5));
     Object.entries(form.value).forEach(([key, value]) => {
       if (value !== null && value !== '') {
         payload.append(key, typeof value === 'boolean' ? (value ? '1' : '0') : String(value));
