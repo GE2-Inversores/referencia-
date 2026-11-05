@@ -360,7 +360,7 @@ function nombrePaciente(sol: Solicitud): string {
 }
 
 function estadoLabel(estado: string): string {
-  return { pendiente: 'Pendiente', pendiente_cama: 'Esperando cama', en_espera: 'En espera' }[estado] ?? estado;
+  return { pendiente: 'Pendiente', pendiente_cama: 'Esperando cama', en_espera: 'Aceptado' }[estado] ?? estado;
 }
 
 function diasEsperando(sol: Solicitud): string {

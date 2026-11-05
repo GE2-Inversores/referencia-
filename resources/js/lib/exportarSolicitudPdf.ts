@@ -14,9 +14,10 @@ import html2canvas from 'html2canvas';
 const ESTADOS: Record<string, { label: string; color: string }> = {
   pendiente: { label: 'Nueva solicitud', color: '#f59e0b' },
   pendiente_cama: { label: 'Pendiente', color: '#f97316' },
-  en_espera: { label: 'En espera', color: '#3b82f6' },
+  en_espera: { label: 'Aceptado', color: '#3b82f6' },
   completado: { label: 'Completada', color: '#22c55e' },
   negado: { label: 'Negada', color: '#ef4444' },
+  cancelado: { label: 'Cancelada', color: '#64748b' },
 };
 
 function esc(valor: unknown): string {

@@ -42,7 +42,7 @@ class SolicitudReferenciaController extends Controller
         abort_unless(request()->user()->hasPermission('clinicas.view'), Response::HTTP_FORBIDDEN);
 
         $solicitudes = SolicitudReferencia::with(['clinica', 'adjuntos', 'diagnosticos', 'eventos', 'evoluciones.adjuntos'])
-            ->whereIn('estado', ['completado', 'negado'])
+            ->whereIn('estado', ['completado', 'negado', 'cancelado'])
             ->orderBy('updated_at', 'desc')
             ->get();
 
@@ -189,6 +189,11 @@ class SolicitudReferenciaController extends Controller
             return response()->json(['message' => 'Solo se puede pedir evolución de solicitudes en estado Pendiente (en espera de cupo).'], 422);
         }
 
+        $validated = $request->validate([
+            'mensaje' => ['nullable', 'string', 'max:1000'],
+        ]);
+        $mensaje = filled($validated['mensaje'] ?? null) ? trim($validated['mensaje']) : null;
+
         $solicitud->load('clinica');
         $correo = $solicitud->correoNotificacion();
 
@@ -197,7 +202,7 @@ class SolicitudReferenciaController extends Controller
         }
 
         try {
-            Mail::to($correo)->send(new SolicitudEvolucionClinica($solicitud));
+            Mail::to($correo)->send(new SolicitudEvolucionClinica($solicitud, $mensaje));
         } catch (Throwable $e) {
             Log::error('No se pudo enviar la solicitud de evolución', [
                 'solicitud_id' => $solicitud->id,
@@ -211,7 +216,7 @@ class SolicitudReferenciaController extends Controller
             'solicitud_referencia_id' => $solicitud->id,
             'tipo' => 'evolucion_solicitada',
             'titulo' => 'Evolución solicitada',
-            'descripcion' => "El equipo de referencia pidió por correo la evolución del paciente a {$correo}.",
+            'descripcion' => "El equipo de referencia pidió por correo la evolución del paciente a {$correo}.".($mensaje ? " Mensaje: {$mensaje}" : ''),
         ]);
 
         $this->notificarClinica(
@@ -228,7 +233,7 @@ class SolicitudReferenciaController extends Controller
     {
         abort_unless($request->user()->hasPermission('clinicas.view'), Response::HTTP_FORBIDDEN);
 
-        if (in_array($solicitud->estado, ['negado', 'completado'], true)) {
+        if (in_array($solicitud->estado, ['negado', 'completado', 'cancelado'], true)) {
             return response()->json(['message' => 'Esta solicitud ya no se puede negar.'], 422);
         }
 
@@ -292,9 +297,10 @@ class SolicitudReferenciaController extends Controller
         // avanzan por el flujo normal (aceptar/negar).
         $labels = [
             'pendiente_cama' => 'Pendiente (en espera de cupo)',
-            'en_espera' => 'En espera',
+            'en_espera' => 'Aceptado',
             'completado' => 'Completada',
             'negado' => 'Negada',
+            'cancelado' => 'Cancelada',
         ];
 
         if ($solicitud->estado === 'pendiente') {

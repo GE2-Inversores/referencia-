@@ -72,6 +72,7 @@ class DashboardController extends BaseController
             'en_espera' => (clone $qDonut)->where('solicitudes_referencia.estado', 'en_espera')->count(),
             'completadas' => (clone $qDonut)->where('solicitudes_referencia.estado', 'completado')->count(),
             'negadas' => (clone $qDonut)->where('solicitudes_referencia.estado', 'negado')->count(),
+            'canceladas' => (clone $qDonut)->where('solicitudes_referencia.estado', 'cancelado')->count(),
         ];
 
         $solicitudesTotal = (clone $query)->count();
@@ -793,7 +794,8 @@ class DashboardController extends BaseController
                 $at = Carbon::parse("{$s->fecha->toDateString()} {$s->hora_respuesta}");
                 [$tipo, $titulo] = match ($s->estado) {
                     'negado' => ['rechazada', 'Referencia rechazada'],
-                    'en_espera' => ['en_espera', 'Referencia en espera'],
+                    'cancelado' => ['cancelada', 'Referencia cancelada'],
+                    'en_espera' => ['en_espera', 'Referencia aceptada'],
                     default => ['aceptada', 'Referencia aceptada'],
                 };
                 $eventos[] = [

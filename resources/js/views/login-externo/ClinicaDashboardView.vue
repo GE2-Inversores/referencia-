@@ -176,7 +176,7 @@ const statCards = computed((): { label: string; icon: typeof ClipboardListIcon; 
     comparacion: comparacionPeriodo(s => s.estado === 'pendiente'),
   },
   {
-    label: 'En espera',
+    label: 'Aceptadas',
     icon: HourglassIcon,
     tone: 'info',
     delta: stats.value.enEspera ? 'Esperando llegada' : 'Sin pacientes en espera',
@@ -343,7 +343,7 @@ const distribucionBarras = computed(() => {
   const total = Math.max(1, stats.value.total);
   return [
     { label: 'Pendientes', count: stats.value.pendientes, pct: Math.round((stats.value.pendientes / total) * 100), color: '#f59e0b', gradient: 'linear-gradient(90deg, #fbbf24, #f59e0b)' },
-    { label: 'En espera', count: stats.value.enEspera, pct: Math.round((stats.value.enEspera / total) * 100), color: '#3b82f6', gradient: 'linear-gradient(90deg, #60a5fa, #3b82f6)' },
+    { label: 'Aceptadas', count: stats.value.enEspera, pct: Math.round((stats.value.enEspera / total) * 100), color: '#3b82f6', gradient: 'linear-gradient(90deg, #60a5fa, #3b82f6)' },
     { label: 'Completadas', count: stats.value.completadas, pct: Math.round((stats.value.completadas / total) * 100), color: '#22c55e', gradient: 'linear-gradient(90deg, #4ade80, #22c55e)' },
     { label: 'Negadas', count: stats.value.negadas, pct: Math.round((stats.value.negadas / total) * 100), color: '#ef4444', gradient: 'linear-gradient(90deg, #f87171, #ef4444)' },
   ];

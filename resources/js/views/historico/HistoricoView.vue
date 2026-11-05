@@ -39,6 +39,18 @@
         </button>
       </div>
       <div class="sol-filter-spacer"></div>
+      <el-input
+        v-model="filtro.buscar"
+        class="sol-search sol-bar-search"
+        placeholder="Buscar por cédula o nombre"
+        aria-label="Buscar en el histórico por cédula o nombre"
+        clearable
+        size="small"
+      >
+        <template #prefix>
+          <component :is="SearchIcon" class="w-3.5 h-3.5 text-gray-400" />
+        </template>
+      </el-input>
       <div class="sol-chips-actions">
         <el-tooltip content="Actualizar" placement="top">
           <button class="sol-icon-btn" @click="cargar">
@@ -72,21 +84,11 @@
             <el-select v-model="filtroEstado" placeholder="Todos los estados" clearable size="small" class="sol-select" @update:model-value="onEstadoSelect">
               <el-option label="Completado" value="completado" />
               <el-option label="Negado" value="negado" />
-              <el-option label="En espera" value="en_espera" />
+              <el-option label="Cancelado" value="cancelado" />
+              <el-option label="Aceptado" value="en_espera" />
               <el-option label="Pendiente" value="pendiente_cama" />
               <el-option label="Nueva solicitud" value="pendiente" />
             </el-select>
-            <el-input
-              v-model="filtro.buscar"
-              placeholder="Buscar paciente, EPS, especialidad..."
-              class="sol-search"
-              clearable
-              size="small"
-            >
-              <template #prefix>
-                <component :is="SearchIcon" class="w-3.5 h-3.5 text-gray-400" />
-              </template>
-            </el-input>
             <el-select v-model="sortKey" aria-label="Ordenar por" size="small">
               <el-option label="Ordenar por fecha" value="fecha" />
               <el-option label="Ordenar por paciente" value="paciente" />
@@ -189,6 +191,7 @@
                   'sol-status-waiting': s.estado === 'en_espera',
                   'sol-status-completed': s.estado === 'completado',
                   'sol-status-rejected': s.estado === 'negado',
+                  'sol-status-cancelled': s.estado === 'cancelado',
                 }">
                   <span class="sol-status-dot"></span>
                   {{ estadoLabel(s.estado) }}
@@ -702,7 +705,7 @@ interface Solicitud {
   condicion_especial?: string;
   urgencia_vital?: boolean;
   observaciones?: string;
-  estado: 'pendiente' | 'pendiente_cama' | 'en_espera' | 'completado' | 'negado';
+  estado: 'pendiente' | 'pendiente_cama' | 'en_espera' | 'completado' | 'negado' | 'cancelado';
   codigo_aceptacion?: string;
   hora_respuesta?: string;
   sede?: string;
@@ -726,7 +729,7 @@ const filtro = useStorage(`historico-filtro-u${uidFiltros}`, { buscar: '' });
 const buscarDebounced = ref(filtro.value.buscar);
 const updateBuscarDebounced = useDebounceFn((val: string) => { buscarDebounced.value = val; }, 300);
 watch(() => filtro.value.buscar, (val) => updateBuscarDebounced(val));
-const tabActiva = useStorage<'todas' | 'completado' | 'negado'>(`historico-tab-u${uidFiltros}`, 'todas');
+const tabActiva = useStorage<'todas' | 'completado' | 'negado' | 'cancelado'>(`historico-tab-u${uidFiltros}`, 'todas');
 
 const sortKey = ref<'paciente' | 'clinica' | 'especialidad' | 'fecha'>('fecha');
 const sortDir = ref<'asc' | 'desc'>('desc');
@@ -750,7 +753,7 @@ const rangoFechas = ref<[string, string] | null>(null);
 const filtroClinica = ref<number | ''>('');
 const filtroEspecialidad = ref('');
 const filtroEps = ref('');
-const filtroEstado = ref<'' | 'completado' | 'negado' | 'en_espera' | 'pendiente' | 'pendiente_cama'>('');
+const filtroEstado = ref<'' | 'completado' | 'negado' | 'cancelado' | 'en_espera' | 'pendiente' | 'pendiente_cama'>('');
 const seleccionadas = ref<Set<number>>(new Set());
 
 watch([itemsPorPagina, rangoFechas, filtroClinica, filtroEspecialidad, filtroEps, filtroEstado, buscarDebounced], () => {
@@ -767,12 +770,14 @@ const resumen = computed(() => ({
   total: solicitudes.value.length,
   completadas: solicitudes.value.filter(s => s.estado === 'completado').length,
   negadas: solicitudes.value.filter(s => s.estado === 'negado').length,
+  canceladas: solicitudes.value.filter(s => s.estado === 'cancelado').length,
 }));
 
-const tabs = computed<{ label: string; value: 'todas' | 'completado' | 'negado'; count: number }[]>(() => [
+const tabs = computed<{ label: string; value: 'todas' | 'completado' | 'negado' | 'cancelado'; count: number }[]>(() => [
   { label: 'Todas', value: 'todas', count: resumen.value.total },
   { label: 'Completadas', value: 'completado', count: resumen.value.completadas },
   { label: 'Negadas', value: 'negado', count: resumen.value.negadas },
+  { label: 'Canceladas', value: 'cancelado', count: resumen.value.canceladas },
 ]);
 
 const isoDia = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -861,7 +866,7 @@ const hayFiltrosActivos = computed(() =>
 
 /** Cuántos filtros del panel están activos (el tab de estado no cuenta — ya se ve en los chips). */
 const conteoFiltros = computed(() =>
-  [filtroClinica.value !== '', filtroEspecialidad.value !== '', filtroEps.value !== '', !!rangoFechas.value, filtroEstado.value !== '', !!filtro.value.buscar]
+  [filtroClinica.value !== '', filtroEspecialidad.value !== '', filtroEps.value !== '', !!rangoFechas.value, filtroEstado.value !== '']
     .filter(Boolean).length
 );
 
@@ -882,13 +887,15 @@ const solicitudesFiltradas = computed(() => {
       const f = s.created_at?.slice(0, 10) ?? '';
       if (f < rangoFechas.value[0] || f > rangoFechas.value[1]) return false;
     }
-    const texto = buscarDebounced.value.toLowerCase();
+    const texto = buscarDebounced.value.trim().toLowerCase();
+    const cedulaBuscada = /^[\d.\s-]+$/.test(texto) ? texto.replace(/[.\s-]/g, '') : '';
     const coincideTexto = !texto ||
       nombreCompleto(s).toLowerCase().includes(texto) ||
       s.eps.toLowerCase().includes(texto) ||
       s.especialidad_requerida.toLowerCase().includes(texto) ||
       s.clinica?.nombre.toLowerCase().includes(texto) ||
-      s.numero_documento.toLowerCase().includes(texto);
+      s.numero_documento.toLowerCase().includes(texto) ||
+      (cedulaBuscada !== '' && s.numero_documento.replace(/[.\s-]/g, '').includes(cedulaBuscada));
     return coincideTexto;
   });
   const dir = sortDir.value === 'asc' ? 1 : -1;
@@ -983,7 +990,7 @@ function verHistoria(s: Solicitud) {
 }
 
 
-function cambiarTab(tab: 'todas' | 'completado' | 'negado') {
+function cambiarTab(tab: 'todas' | 'completado' | 'negado' | 'cancelado') {
   tabActiva.value = tab;
   filtroEstado.value = '';
   paginaActual.value = 1;
@@ -1036,7 +1043,7 @@ function descripcionSinCodigo(dx: { codigo_cie10: string; descripcion: string })
 }
 
 function estadoLabel(estado: string) {
-  return { pendiente: 'Nueva solicitud', pendiente_cama: 'Pendiente', en_espera: 'En espera', completado: 'Completado', negado: 'Negado' }[estado] ?? estado;
+  return { pendiente: 'Nueva solicitud', pendiente_cama: 'Pendiente', en_espera: 'Aceptado', completado: 'Completado', negado: 'Negado', cancelado: 'Cancelado' }[estado] ?? estado;
 }
 
 function grupoNegacionLabel(grupo?: string): string {
@@ -1099,6 +1106,11 @@ const pasosSeguimiento = computed<PasoSeguimiento[]>(() => {
 
   if (s.estado === 'negado') {
     pasos.push({ titulo: 'Solicitud negada', fecha: respuestaFecha, hecho: true, tipo: 'negada' });
+    return pasos;
+  }
+
+  if (s.estado === 'cancelado') {
+    pasos.push({ titulo: 'Solicitud cancelada', fecha: respuestaFecha, hecho: true, tipo: 'negada' });
     return pasos;
   }
 
@@ -1349,9 +1361,10 @@ const opcionesCambioEstado = computed(() => {
   const actual = solicitudSeleccionada.value?.estado;
   return [
     { label: 'Pendiente — en espera de cupo', value: 'pendiente_cama' },
-    { label: 'En espera (con código)', value: 'en_espera' },
+    { label: 'Aceptado (con código)', value: 'en_espera' },
     { label: 'Completada', value: 'completado' },
     { label: 'Negada', value: 'negado' },
+    { label: 'Cancelada', value: 'cancelado' },
   ].filter(op => op.value !== actual);
 });
 
@@ -1398,7 +1411,7 @@ async function cambiarEstado() {
     notify.success(data.message || 'Estado actualizado');
     const idx = solicitudes.value.findIndex(s => s.id === solicitudSeleccionada.value!.id);
     if (idx !== -1) {
-      if (data.data.estado === 'completado' || data.data.estado === 'negado') {
+      if (['completado', 'negado', 'cancelado'].includes(data.data.estado)) {
         solicitudes.value[idx] = data.data;
       } else {
         // Salió del histórico hacia la cola activa — se quita de esta vista.
@@ -1420,7 +1433,7 @@ function abrirHistoriaClinica() {
 /** Preselecciona el tab al llegar desde la tarjeta de Completadas/Negadas en Solicitudes (?estado=completado|negado). */
 function aplicarEstadoQuery() {
   const estado = route.query.estado;
-  if (estado === 'completado' || estado === 'negado') {
+  if (estado === 'completado' || estado === 'negado' || estado === 'cancelado') {
     tabActiva.value = estado;
     const { estado: _estado, ...resto } = route.query;
     router.replace({ query: resto });
@@ -1578,6 +1591,7 @@ usePolling(() => {
 .sol-tab-dot--en_espera { background: #3b82f6; }
 .sol-tab-dot--completado { background: #22c55e; }
 .sol-tab-dot--negado { background: #ef4444; }
+.sol-tab-dot--cancelado { background: #94a3b8; }
 
 /* ── Fila resaltada (llegó desde una notificación) ── */
 @keyframes sol-row-glow {
@@ -1872,6 +1886,7 @@ usePolling(() => {
 
 /* ── Search ── */
 .sol-search { flex: 1; min-width: 200px; max-width: 400px; }
+.sol-bar-search { flex: 0 1 280px; min-width: 180px; }
 .sol-filter-bar :deep(.el-input__wrapper) {
   background: rgba(255,255,255,0.75) !important;
   border: 1px solid #d4deea !important;
@@ -1943,6 +1958,7 @@ usePolling(() => {
 .hist-card--en_espera { border-color: #b5d3fb; background: linear-gradient(110deg, #e8f2ff, #f3f9ff); box-shadow: inset 3px 0 0 #3b82f6; }
 .hist-card--completado { border-color: #b8e6c8; background: linear-gradient(110deg, #edf9f0, #f7fcf8); box-shadow: inset 3px 0 0 #22c55e; }
 .hist-card--negado { border-color: #f3b4bc; background: linear-gradient(110deg, #fff0f2, #fff7f8); box-shadow: inset 3px 0 0 #ef4444; }
+.hist-card--cancelado { border-color: #d3dbe6; background: linear-gradient(110deg, #f1f4f8, #f8fafc); box-shadow: inset 3px 0 0 #94a3b8; }
 .hist-card-urgent { border-color: #f7829a; background: linear-gradient(110deg, #ffe7ed, #fff1f4); box-shadow: inset 3px 0 0 #e11d48; }
 .hist-card-urgent:hover { border-color: #f43f5e; box-shadow: inset 3px 0 0 #be123c, 0 4px 14px rgba(225,29,72,.12); }
 .hist-card-resaltada { animation: sol-row-glow 2.2s ease-in-out 2; box-shadow: inset 3px 0 0 #D97706 !important; }
@@ -1997,6 +2013,7 @@ usePolling(() => {
 .dark .hist-card--en_espera { border-color: #2e5a9c; background: linear-gradient(110deg, #16263f, #182135); box-shadow: inset 3px 0 0 #4d8ef7; }
 .dark .hist-card--completado { border-color: #2f6b44; background: linear-gradient(110deg, #14291c, #16241b); box-shadow: inset 3px 0 0 #34c468; }
 .dark .hist-card--negado { border-color: #7c3a44; background: linear-gradient(110deg, #331e24, #2a1d22); box-shadow: inset 3px 0 0 #f05656; }
+.dark .hist-card--cancelado { border-color: #3a4558; background: linear-gradient(110deg, #1d2432, #1a202c); box-shadow: inset 3px 0 0 #7c8aa0; }
 .dark .hist-card-urgent { border-color: #b03d5c; background: linear-gradient(110deg, #3d1f2e, #2c1d2b); box-shadow: inset 3px 0 0 #fb4d78; }
 .dark .hist-card-name { color: #dbe7fb; }
 .dark .hist-card-name:hover { color: #93c5fd; }
@@ -2038,6 +2055,9 @@ usePolling(() => {
 .sol-status-completed .sol-status-dot { background: #22c55e; }
 .sol-status-rejected { background: #fee2e2; color: #dc2626; }
 .sol-status-rejected .sol-status-dot { background: #ef4444; }
+.sol-status-cancelled { background: #e2e8f0; color: #475569; }
+.sol-status-cancelled .sol-status-dot { background: #64748b; }
+.dark .sol-status-cancelled { background: #2a3447; color: #b6c2d6; }
 
 /* ── Empty state ── */
 .sol-empty-wrap {
@@ -2167,6 +2187,7 @@ usePolling(() => {
 .detalle-head-badge.estado-en_espera { background: #dbeafe; color: #1d4ed8; }
 .detalle-head-badge.estado-completado { background: #dcfce7; color: #16a34a; }
 .detalle-head-badge.estado-negado { background: #fee2e2; color: #b91c1c; }
+.detalle-head-badge.estado-cancelado { background: #e2e8f0; color: #475569; }
 
 .detalle-head-pdf {
   position: relative; z-index: 1;

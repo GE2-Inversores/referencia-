@@ -17,7 +17,7 @@
       />
       <StatCard
         variant="pastel" tone="violet" solid-icon
-        label="En espera" :value="displayStats[2]"
+        label="Aceptado" :value="displayStats[2]"
         :comparacion="deltaEnEspera"
         :icon="HourglassIcon" :sparkline="ondular(serieEnEspera, 5)"
       />
@@ -91,7 +91,7 @@
                 <el-option label="Todos los estados" value="todas" />
                 <el-option label="Nueva solicitud" value="pendiente" />
                 <el-option label="Pendiente" value="pendiente_cama" />
-                <el-option label="En espera" value="en_espera" />
+                <el-option label="Aceptado" value="en_espera" />
               </el-select>
               <el-select v-model="sortKey" aria-label="Ordenar solicitudes por" size="small">
                 <el-option label="Ordenar por fecha" value="fecha" />
@@ -122,7 +122,7 @@
         <span class="sol-tab-dot"></span> Pendiente <span class="sol-tab-count">{{ resumen.pendientesCama }}</span>
       </button>
       <button type="button" class="sol-tab sol-tab-en-espera" role="tab" :class="{ 'sol-tab-active': tabActiva === 'en_espera' }" :aria-selected="tabActiva === 'en_espera'" @click="cambiarTab('en_espera')">
-        <span class="sol-tab-dot"></span> En espera <span class="sol-tab-count">{{ resumen.enEspera }}</span>
+        <span class="sol-tab-dot"></span> Aceptado <span class="sol-tab-count">{{ resumen.enEspera }}</span>
       </button>
     </div>
 
@@ -1394,7 +1394,7 @@ interface Solicitud {
   gestante?: boolean;
   condicion_especial?: string;
   observaciones?: string;
-  estado: 'pendiente' | 'pendiente_cama' | 'en_espera' | 'completado' | 'negado';
+  estado: 'pendiente' | 'pendiente_cama' | 'en_espera' | 'completado' | 'negado' | 'cancelado';
   codigo_aceptacion?: string;
   hora_respuesta?: string;
   hora_llegada?: string;
@@ -1506,9 +1506,10 @@ const opcionesCambioEstado = computed(() => {
   const actual = solicitudSeleccionada.value?.estado;
   return [
     { label: 'Pendiente — en espera de cupo', value: 'pendiente_cama' },
-    { label: 'En espera (con código)', value: 'en_espera' },
+    { label: 'Aceptado (con código)', value: 'en_espera' },
     { label: 'Completada', value: 'completado' },
     { label: 'Negada', value: 'negado' },
+    { label: 'Cancelada', value: 'cancelado' },
   ].filter(op => op.value !== actual);
 });
 
@@ -1525,6 +1526,7 @@ const MOTIVOS_NEGACION_POBLACION = [
   'No transladable',
   'Sin respuesta por parte de intensivista',
   'Paciente no comentado por la EPS',
+  'Soportes incompletos',
 ];
 
 function seleccionarGrupoNegacion(grupo: 'no_red' | 'poblacion_objeto') {
@@ -1874,7 +1876,7 @@ function descripcionSinCodigo(dx: { codigo_cie10: string; descripcion: string })
 }
 
 function estadoLabel(estado: string) {
-  return { pendiente: 'Nueva solicitud', pendiente_cama: 'Pendiente', en_espera: 'En espera', completado: 'Completada', negado: 'Negada' }[estado] ?? estado;
+  return { pendiente: 'Nueva solicitud', pendiente_cama: 'Pendiente', en_espera: 'Aceptado', completado: 'Completada', negado: 'Negada', cancelado: 'Cancelada' }[estado] ?? estado;
 }
 
 /** Qué significa cada estado — tooltip en badges y tabs (pendiente vs
@@ -1884,7 +1886,7 @@ function estadoTooltip(estado: string): string {
     todas: 'Toda la cola activa.',
     pendiente: 'Nueva — sin revisar, falta aceptarla o negarla.',
     pendiente_cama: 'Aceptada en espera de cupo — el código se envía cuando haya disponibilidad.',
-    en_espera: 'Aceptada — esperando que el paciente llegue a la sede.',
+    en_espera: 'Aceptado — esperando que el paciente llegue a la sede.',
     completado: 'El paciente ya fue atendido.',
     negado: 'La solicitud fue rechazada.',
   }[estado] ?? estado;
@@ -1961,6 +1963,11 @@ const pasosSeguimiento = computed<PasoSeguimiento[]>(() => {
 
   if (s.estado === 'negado') {
     pasos.push({ titulo: 'Solicitud negada', fecha: respuestaFecha, hecho: true, tipo: 'negada' });
+    return pasos;
+  }
+
+  if (s.estado === 'cancelado') {
+    pasos.push({ titulo: 'Solicitud cancelada', fecha: respuestaFecha, hecho: true, tipo: 'negada' });
     return pasos;
   }
 
@@ -2241,17 +2248,26 @@ function manejarAccionFila(comando: string, s: Solicitud) {
 
 /** Le pide por correo a la clínica la evolución actual del paciente (el correo lleva un enlace directo al módulo de Evolución). */
 async function solicitarEvolucion(s: Solicitud) {
+  let mensaje = '';
   try {
-    await ElMessageBox.confirm(
-      `Se enviará un correo a ${s.clinica?.nombre ?? s.institucion_remitente ?? 'la clínica'} pidiendo la evolución de ${nombreCompleto(s)}.`,
+    const respuesta = await ElMessageBox.prompt(
+      `Se enviará un correo a ${s.clinica?.nombre ?? s.institucion_remitente ?? 'la clínica'} pidiendo la evolución de ${nombreCompleto(s)}. Puedes agregar un mensaje opcional que irá en el correo:`,
       'Solicitar evolución',
-      { confirmButtonText: 'Enviar correo', cancelButtonText: 'Cancelar', type: 'info' },
+      {
+        confirmButtonText: 'Enviar correo',
+        cancelButtonText: 'Cancelar',
+        type: 'info',
+        inputType: 'textarea',
+        inputPlaceholder: 'Mensaje para la clínica (opcional)',
+        inputValidator: (valor: string) => (valor ?? '').length <= 1000 || 'Máximo 1000 caracteres',
+      },
     );
+    mensaje = respuesta.value?.trim() ?? '';
   } catch {
     return;
   }
   try {
-    const { data } = await http.post(`/api/solicitudes-referencia/${s.id}/solicitar-evolucion`);
+    const { data } = await http.post(`/api/solicitudes-referencia/${s.id}/solicitar-evolucion`, { mensaje: mensaje || null });
     notify.success(data.message || 'Solicitud de evolución enviada');
     const idx = solicitudes.value.findIndex(x => x.id === s.id);
     if (idx !== -1) solicitudes.value[idx] = { ...solicitudes.value[idx], ...data.data };
@@ -2539,7 +2555,11 @@ async function cambiarEstado() {
     const { data } = await http.post(`/api/solicitudes-referencia/${solicitudSeleccionada.value!.id}/cambiar-estado`, f);
     notify.success(data.message || 'Estado actualizado');
     const idx = solicitudes.value.findIndex(s => s.id === solicitudSeleccionada.value!.id);
-    if (idx !== -1) solicitudes.value[idx] = data.data;
+    if (idx !== -1) {
+      // Cancelada sale de la cola activa — pasa al Histórico.
+      if (data.data.estado === 'cancelado') solicitudes.value.splice(idx, 1);
+      else solicitudes.value[idx] = data.data;
+    }
     modalCambiar.value = false;
   } catch (e: any) {
     notify.error(e.response?.data?.message || 'Error al cambiar el estado');
@@ -3956,6 +3976,7 @@ usePolling(() => {
 .detalle-head-badge.estado-en_espera { background: #dbeafe; color: #1d4ed8; }
 .detalle-head-badge.estado-completado { background: #dcfce7; color: #16a34a; }
 .detalle-head-badge.estado-negado { background: #fee2e2; color: #b91c1c; }
+.detalle-head-badge.estado-cancelado { background: #e2e8f0; color: #475569; }
 
 .sol-urgencia-detail-badge {
   display: inline-flex;

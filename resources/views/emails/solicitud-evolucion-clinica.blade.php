@@ -23,6 +23,12 @@
           <p style="margin:0 0 6px;color:#0D2D6B;font-size:15px;font-weight:bold;">Solicitud de evolución</p>
           <p style="margin:0 0 12px;color:#334155;font-size:13px;line-height:1.7;">Cordial saludo.</p>
           <p style="margin:0 0 12px;color:#334155;font-size:13px;line-height:1.7;">El paciente se encuentra pendiente de disponibilidad de cupo para la generación del código de aceptación. Por lo anterior, agradecemos continuar enviando la evolución médica actualizada, con el fin de realizar el seguimiento correspondiente y gestionar la asignación del cupo.</p>
+          @if(filled($mensaje))
+          <div style="margin:0 0 16px;padding:14px 16px;background:#eff6ff;border:1px solid #bfdbfe;border-left:4px solid #2563eb;border-radius:10px;">
+            <p style="margin:0 0 6px;color:#1e40af;font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:.04em;">Mensaje del equipo de referencia</p>
+            <p style="margin:0;color:#334155;font-size:13px;line-height:1.7;white-space:pre-line;">{{ $mensaje }}</p>
+          </div>
+          @endif
           <p style="margin:0 0 22px;color:#334155;font-size:13px;line-height:1.7;">Muchas gracias por su colaboración.</p>
           <p style="margin:0 0 10px;color:#64748b;font-size:12px;">Referencia <strong style="color:#16468E;">ID{{ str_pad((string) $solicitud->id, 6, '0', STR_PAD_LEFT) }}</strong></p>
 

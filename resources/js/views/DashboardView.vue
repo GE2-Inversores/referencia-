@@ -497,7 +497,7 @@ type Periodo = 'dia' | 'semana' | 'mes' | 'anio' | 'todo';
 
 const stats = ref({
   solicitudes: { total: 0, pendientes: 0, negadas: 0, en_espera: 0, completadas: 0 },
-  distribucion: { total: 0, pendientes: 0, negadas: 0, en_espera: 0, completadas: 0 },
+  distribucion: { total: 0, pendientes: 0, negadas: 0, en_espera: 0, completadas: 0, canceladas: 0 },
   clinicas: { total: 0, activas: 0, pendientes: 0, nuevas_mes: 0 },
   usuarios: { total: 0, activos: 0 },
   solicitudes_recientes: [] as any[],
@@ -637,7 +637,7 @@ const statCards = computed((): { label: string; value: string; icon: typeof Clip
       value: String(displayStats.value[1]),
       icon: ClockIcon,
       tone: 'warning',
-      delta: `${stats.value.solicitudes.en_espera} en espera`,
+      delta: `${stats.value.solicitudes.en_espera} aceptadas`,
       percent: stats.value.solicitudes.total ? Math.round((stats.value.solicitudes.pendientes / stats.value.solicitudes.total) * 100) : 0,
       sparkline: stats.value.tendencia_pendientes.map(t => t.total),
       comparacion: comparacionTexto(cambioPend),
@@ -660,9 +660,10 @@ const donutBars = computed(() => {
   const total = Math.max(1, s.total);
   return [
     { label: 'Completadas', value: s.completadas, color: '#22c55e', pct: Math.round((s.completadas / total) * 100) },
-    { label: 'En espera', value: s.en_espera, color: '#3b82f6', pct: Math.round((s.en_espera / total) * 100) },
+    { label: 'Aceptadas', value: s.en_espera, color: '#3b82f6', pct: Math.round((s.en_espera / total) * 100) },
     { label: 'Pendientes', value: s.pendientes, color: '#f59e0b', pct: Math.round((s.pendientes / total) * 100) },
     { label: 'Negadas', value: s.negadas, color: '#ef4444', pct: Math.round((s.negadas / total) * 100) },
+    { label: 'Canceladas', value: s.canceladas ?? 0, color: '#94a3b8', pct: Math.round(((s.canceladas ?? 0) / total) * 100) },
   ];
 });
 
@@ -1016,6 +1017,7 @@ function actividadTono(tipo: string): { icon: typeof ActivityIcon; color: string
   switch (tipo) {
     case 'aceptada': return { icon: CheckCircleIcon, color: '#16a34a', bg: '#dcfce7' };
     case 'rechazada': return { icon: XCircleIcon, color: '#dc2626', bg: '#fee2e2' };
+    case 'cancelada': return { icon: XCircleIcon, color: '#64748b', bg: '#e2e8f0' };
     case 'en_espera': return { icon: ClockIcon, color: '#d97706', bg: '#fef3c7' };
     case 'usuario': return { icon: UserPlusIcon, color: '#7c3aed', bg: '#ede9fe' };
     default: return { icon: FilePlusIcon, color: '#0d9488', bg: '#ccfbf1' };
@@ -1043,9 +1045,10 @@ function pacAvatarColor(nombre: string): { bg: string; color: string } {
 function estadoLabel(estado: string): string {
   return {
     pendiente: 'Pendiente',
-    en_espera: 'En espera',
+    en_espera: 'Aceptado',
     completado: 'Completada',
     negado: 'Negada',
+    cancelado: 'Cancelada',
   }[estado] ?? estado;
 }
 

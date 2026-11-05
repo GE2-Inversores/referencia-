@@ -16,7 +16,7 @@ class SolicitudEvolucionClinica extends Mailable
 
     public string $enlace;
 
-    public function __construct(public SolicitudReferencia $solicitud)
+    public function __construct(public SolicitudReferencia $solicitud, public ?string $mensaje = null)
     {
         $this->enlace = rtrim((string) config('app.url'), '/').'/clinica/evolucion?id='.$solicitud->id;
     }

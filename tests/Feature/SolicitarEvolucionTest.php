@@ -70,6 +70,46 @@ class SolicitarEvolucionTest extends TestCase
         ]);
     }
 
+    public function test_optional_message_is_included_in_the_email_and_the_event(): void
+    {
+        Mail::fake();
+        $solicitud = $this->solicitud();
+
+        $this->actingAs($this->staff())
+            ->postJson("/api/solicitudes-referencia/{$solicitud->id}/solicitar-evolucion", [
+                'mensaje' => 'Favor adjuntar la evolución de las últimas 24 horas.',
+            ])
+            ->assertOk();
+
+        Mail::assertSent(SolicitudEvolucionClinica::class, function (SolicitudEvolucionClinica $mail): bool {
+            return $mail->mensaje === 'Favor adjuntar la evolución de las últimas 24 horas.'
+                && str_contains($mail->render(), 'Favor adjuntar la evolución de las últimas 24 horas.');
+        });
+        $this->assertDatabaseHas('solicitud_referencia_eventos', [
+            'solicitud_referencia_id' => $solicitud->id,
+            'tipo' => 'evolucion_solicitada',
+        ]);
+    }
+
+    public function test_email_without_message_has_no_message_block_and_overlong_messages_are_rejected(): void
+    {
+        Mail::fake();
+        $staff = $this->staff();
+        $solicitud = $this->solicitud();
+
+        $this->actingAs($staff)
+            ->postJson("/api/solicitudes-referencia/{$solicitud->id}/solicitar-evolucion", ['mensaje' => str_repeat('a', 1001)])
+            ->assertStatus(422);
+
+        $this->actingAs($staff)
+            ->postJson("/api/solicitudes-referencia/{$solicitud->id}/solicitar-evolucion", ['mensaje' => null])
+            ->assertOk();
+
+        Mail::assertSent(SolicitudEvolucionClinica::class, function (SolicitudEvolucionClinica $mail): bool {
+            return $mail->mensaje === null && ! str_contains($mail->render(), 'Mensaje del equipo de referencia');
+        });
+    }
+
     public function test_can_only_request_evolution_for_pending_cupo_requests(): void
     {
         Mail::fake();

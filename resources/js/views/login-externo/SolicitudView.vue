@@ -188,7 +188,7 @@
 
           <div class="rf-subsection rf-subsection-first">
             <div class="rf-grid">
-              <el-form-item label="Institución que refiere" prop="institucion_remitente" required :class="['rf-field rf-col-2 rf-stagger-1', { 'is-success': camposValidos.institucion_remitente }]">
+              <el-form-item label="Institución que refiere (IPS o EPS)" prop="institucion_remitente" required :class="['rf-field rf-col-2 rf-stagger-1', { 'is-success': camposValidos.institucion_remitente }]">
                 <el-select
                   v-model="form.clinica_id"
                   filterable
@@ -1050,7 +1050,7 @@ const CAMPO_LABELS: Record<string, string> = {
   municipio_capita: 'Municipio',
   especialidad_requerida: 'Especialidad requerida',
   tipo_referencia: 'Tipo de referencia',
-  institucion_remitente: 'Institución que refiere',
+  institucion_remitente: 'Institución que refiere (IPS o EPS)',
   servicio_ubicacion_actual: 'Servicio / Ubicación actual',
   urgencia_vital: 'Urgencia vital',
   resumen_historia_clinica: 'Historia clínica',
