@@ -231,6 +231,7 @@
                   <el-option label="Contacto" value="contacto" />
                   <el-option label="Respiratorio" value="respiratorio" />
                   <el-option label="Cohortizado" value="cohortizado" />
+                  <el-option label="Vectores" value="vectores" />
                 </el-select>
               </el-form-item>
               <el-form-item label="¿Paciente gestante?" :class="['rf-field rf-col-quarter rf-stagger-7', { 'is-success': camposValidos.gestante }]">

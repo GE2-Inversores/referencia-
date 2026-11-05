@@ -259,7 +259,7 @@ class SolicitudReferenciaController extends Controller
             'clinica_id' => ['nullable', 'integer', 'exists:clinicas,id'],
             'municipio_remitente' => ['nullable', 'string', 'max:120'],
             'requiere_aislamiento' => ['nullable', 'boolean'],
-            'tipo_aislamiento' => ['nullable', 'string', 'in:contacto,respiratorio,cohortizado'],
+            'tipo_aislamiento' => ['nullable', 'string', 'in:contacto,respiratorio,cohortizado,vectores'],
             'quien_remitente' => ['required', 'string', 'max:200'],
             'telefono_contacto' => ['required', 'string', 'max:30'],
             'correo_contacto' => ['nullable', 'email', 'max:150'],

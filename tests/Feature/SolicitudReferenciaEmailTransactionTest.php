@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Mail\NuevaSolicitudReferenciaInterna;
+use App\Models\SolicitudReferencia;
 use Database\Seeders\PermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -57,6 +58,23 @@ class SolicitudReferenciaEmailTransactionTest extends TestCase
         $this->assertDatabaseCount('solicitudes_referencia', 1);
         $this->assertDatabaseCount('solicitud_referencia_eventos', 1);
         Mail::assertSent(NuevaSolicitudReferenciaInterna::class);
+    }
+
+    public function test_vectors_is_a_valid_isolation_type_and_unknown_ones_are_rejected(): void
+    {
+        Mail::fake();
+
+        $this->postJson('/api/externo/solicitudes', $this->validPayload([
+            'requiere_aislamiento' => true,
+            'tipo_aislamiento' => 'vectores',
+        ]))->assertCreated();
+
+        $this->assertSame('vectores', SolicitudReferencia::query()->firstOrFail()->tipo_aislamiento);
+
+        $this->postJson('/api/externo/solicitudes', $this->validPayload([
+            'requiere_aislamiento' => true,
+            'tipo_aislamiento' => 'inventado',
+        ]))->assertStatus(422)->assertJsonStructure(['data' => ['errors' => ['tipo_aislamiento']]]);
     }
 
     /**
