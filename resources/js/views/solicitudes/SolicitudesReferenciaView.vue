@@ -801,6 +801,7 @@
                   <div>
                     <label class="accion-field-label">Lugar <span class="accion-required">*</span></label>
                     <el-select v-model="formAceptar.lugar_llegada" placeholder="Seleccione el servicio" class="w-full" popper-class="negar-motivo-popper">
+                      <el-option label="Urgencias" value="URGENCIAS" />
                       <el-option label="UCI" value="UCI" />
                       <el-option label="UCIN" value="UCIN" />
                       <el-option label="Hospitalización 2do" value="HOSPITALIZACION 2DO" />
@@ -1075,6 +1076,7 @@
                   <div>
                     <label class="accion-field-label">Lugar <span class="accion-required">*</span></label>
                     <el-select v-model="formCambiar.lugar_llegada" placeholder="Seleccione el servicio" class="w-full" popper-class="negar-motivo-popper">
+                      <el-option label="Urgencias" value="URGENCIAS" />
                       <el-option label="UCI" value="UCI" />
                       <el-option label="UCIN" value="UCIN" />
                       <el-option label="Hospitalización 2do" value="HOSPITALIZACION 2DO" />
