@@ -3,9 +3,9 @@
 namespace App\Mail;
 
 use App\Models\Clinica;
+use App\Services\MailConfigService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
-use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
@@ -19,7 +19,7 @@ class ClinicaRegistroConfirmacion extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            replyTo: [new Address(config('mail.referencia_interna'), config('mail.referencia_nombre'))],
+            replyTo: MailConfigService::replyToAddresses(),
             subject: 'Solicitud de registro recibida — Sistema de Referencia Santa Bárbara',
         );
     }

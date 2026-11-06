@@ -188,6 +188,8 @@
                     <p class="sol-reference-contact" v-if="s.quien_remitente || s.telefono_contacto" :title="[s.quien_remitente, s.telefono_contacto].filter(Boolean).join(' · ')">
                     {{ s.quien_remitente || '—' }}<span v-if="s.telefono_contacto"> · {{ s.telefono_contacto }}</span>
                     </p>
+                    <span class="sol-reference-label sol-reference-diagnosis-label">Servicio que refiere</span>
+                    <p class="sol-reference-diagnosis" :title="s.servicio_remision || s.servicio_ubicacion_actual">{{ s.servicio_remision || s.servicio_ubicacion_actual || '—' }}</p>
                   </div>
                   <div class="sol-reference-clinical sol-reference-divider">
                     <span class="sol-reference-label">Especialidad</span>
@@ -798,7 +800,14 @@
                   </div>
                   <div>
                     <label class="accion-field-label">Lugar <span class="accion-required">*</span></label>
-                    <el-input v-model="formAceptar.lugar_llegada" placeholder="Ej: Urgencias" />
+                    <el-select v-model="formAceptar.lugar_llegada" placeholder="Seleccione el servicio" class="w-full" popper-class="negar-motivo-popper">
+                      <el-option label="UCI" value="UCI" />
+                      <el-option label="UCIN" value="UCIN" />
+                      <el-option label="Hospitalización 2do" value="HOSPITALIZACION 2DO" />
+                      <el-option label="Hospitalización 8vo" value="HOSPITALIZACION 8VO" />
+                      <el-option label="Hospitalización 7mo" value="HOSPITALIZACION 7MO" />
+                      <el-option label="Angiografía/Hemodinamia" value="ANGIOGRAFIA/HEMODINAMIA" />
+                    </el-select>
                   </div>
                 </div>
                 <p class="accion-field-hint mb-1.5">El código real que generó Gomedisys al registrar al paciente allá — no se inventa acá.</p>
@@ -806,6 +815,13 @@
                 <div>
                   <label class="accion-field-label">Observaciones</label>
                   <el-input v-model="formAceptar.observaciones_respuesta" type="textarea" :rows="2" placeholder="Opcional" />
+                </div>
+                <div class="mb-1.5">
+                  <label class="accion-field-label">Correo de notificación a la clínica</label>
+                  <div class="correo-destino-row">
+                    <span class="correo-destino-chip" :title="correoDestinoClinica">{{ correoDestinoClinica }}</span>
+                    <el-select v-model="formAceptar.correos_extra" multiple filterable allow-create default-first-option :reserve-keyword="false" collapse-tags :max-collapse-tags="2" placeholder="Escribe correos y presiona Enter (opcional)" class="flex-1" />
+                  </div>
                 </div>
                 <div class="negar-attach">
                   <input
@@ -955,6 +971,13 @@
                   <label class="accion-field-label">Observaciones adicionales</label>
                   <el-input v-model="formNegar.observaciones_respuesta" type="textarea" :rows="2" placeholder="Opcional" />
                 </div>
+                <div>
+                  <label class="accion-field-label">Correo de notificación a la clínica</label>
+                  <div class="correo-destino-row">
+                    <span class="correo-destino-chip" :title="correoDestinoClinica">{{ correoDestinoClinica }}</span>
+                    <el-select v-model="formNegar.correos_extra" multiple filterable allow-create default-first-option :reserve-keyword="false" collapse-tags :max-collapse-tags="2" placeholder="Escribe correos y presiona Enter (opcional)" class="flex-1" />
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1051,7 +1074,14 @@
                   </div>
                   <div>
                     <label class="accion-field-label">Lugar <span class="accion-required">*</span></label>
-                    <el-input v-model="formCambiar.lugar_llegada" placeholder="Ej: Urgencias" />
+                    <el-select v-model="formCambiar.lugar_llegada" placeholder="Seleccione el servicio" class="w-full" popper-class="negar-motivo-popper">
+                      <el-option label="UCI" value="UCI" />
+                      <el-option label="UCIN" value="UCIN" />
+                      <el-option label="Hospitalización 2do" value="HOSPITALIZACION 2DO" />
+                      <el-option label="Hospitalización 8vo" value="HOSPITALIZACION 8VO" />
+                      <el-option label="Hospitalización 7mo" value="HOSPITALIZACION 7MO" />
+                      <el-option label="Angiografía/Hemodinamia" value="ANGIOGRAFIA/HEMODINAMIA" />
+                    </el-select>
                   </div>
                 </div>
                 <div v-if="formCambiar.estado === 'completado'" class="mb-1.5">
@@ -1061,6 +1091,13 @@
                 <div>
                   <label class="accion-field-label">Motivo del cambio <span class="accion-required">*</span></label>
                   <el-input v-model="formCambiar.motivo" type="textarea" :rows="2" placeholder="Explique por qué cambia el estado — va en el correo a la clínica..." />
+                </div>
+                <div>
+                  <label class="accion-field-label">Correo de notificación a la clínica</label>
+                  <div class="correo-destino-row">
+                    <span class="correo-destino-chip" :title="correoDestinoClinica">{{ correoDestinoClinica }}</span>
+                    <el-select v-model="formCambiar.correos_extra" multiple filterable allow-create default-first-option :reserve-keyword="false" collapse-tags :max-collapse-tags="2" placeholder="Escribe correos y presiona Enter (opcional)" class="flex-1" />
+                  </div>
                 </div>
               </div>
             </div>
@@ -1273,6 +1310,16 @@
                 <p class="accion-field-hint mt-1.5">Cierra la referencia como negada y avisa a la clínica con este motivo.</p>
               </div>
             </div>
+
+            <div class="detalle-card mt-2">
+              <div class="card-body accion-form-body">
+                <label class="accion-field-label">Correo de notificación a la clínica</label>
+                <div class="correo-destino-row">
+                  <span class="correo-destino-chip" :title="correoDestinoClinica">{{ correoDestinoClinica }}</span>
+                  <el-select v-model="correosExtraIngreso" multiple filterable allow-create default-first-option :reserve-keyword="false" collapse-tags :max-collapse-tags="2" placeholder="Escribe correos y presiona Enter (opcional)" class="flex-1" />
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="detalle-footer">
@@ -1358,6 +1405,7 @@ const router = useRouter();
 interface Clinica {
   id: number;
   nombre: string;
+  email?: string;
 }
 
 interface Solicitud {
@@ -1494,10 +1542,10 @@ const modalFichaGomedisys = ref(false);
 const campoCopiado = ref<string | null>(null);
 const adjuntoActivo = ref<{ id: number; nombre_original: string; mime_type: string; tamano: number } | null>(null);
 
-const formAceptar = ref({ fecha_respuesta: '', hora_respuesta: '', nombre_quien_responde: '', sin_disponibilidad: false, sede: '', eps: '', codigo_aceptacion: '', hora_llegada: '', lugar_llegada: '', observaciones_respuesta: '' });
-const formNegar = ref({ fecha_respuesta: '', hora_respuesta: '', grupo_negacion: '', motivo_negacion: '', eps: '', nombre_quien_responde: '', observaciones_respuesta: '' });
+const formAceptar = ref<{ [k: string]: string | boolean | string[] }>({ fecha_respuesta: '', hora_respuesta: '', nombre_quien_responde: '', sin_disponibilidad: false, sede: '', eps: '', codigo_aceptacion: '', hora_llegada: '', lugar_llegada: '', observaciones_respuesta: '', correos_extra: [] });
+const formNegar = ref<{ [k: string]: string | string[] }>({ fecha_respuesta: '', hora_respuesta: '', grupo_negacion: '', motivo_negacion: '', eps: '', nombre_quien_responde: '', observaciones_respuesta: '', correos_extra: [] });
 const modalCambiar = ref(false);
-const formCambiar = ref({ fecha_respuesta: '', hora_respuesta: '', nombre_quien_responde: '', estado: '', motivo: '', sede: '', codigo_aceptacion: '', hora_llegada: '', lugar_llegada: '', numero_ingreso: '', eps: '' });
+const formCambiar = ref<{ [k: string]: string | string[] }>({ fecha_respuesta: '', hora_respuesta: '', nombre_quien_responde: '', estado: '', motivo: '', sede: '', codigo_aceptacion: '', hora_llegada: '', lugar_llegada: '', numero_ingreso: '', eps: '', correos_extra: [] });
 
 // Destinos posibles del cambio manual — "Nueva solicitud" queda excluida:
 // las nuevas solo avanzan por el flujo normal (aceptar/negar). Tampoco se
@@ -2288,6 +2336,7 @@ async function consultarIngreso(s: Solicitud) {
     datosIngresoGomedisys.value = data.ingreso ? data.paciente : null;
     numeroIngresoManual.value = data.paciente?.admission_number ? String(data.paciente.admission_number) : '';
     motivoNoIngreso.value = '';
+    correosExtraIngreso.value = [];
     modalConfirmarIngreso.value = true;
   } catch (e: any) {
     notify.error(e.response?.data?.message || 'No se pudo consultar el ingreso en Gomedisys');
@@ -2309,6 +2358,7 @@ async function confirmarIngresoPaciente() {
     procesandoIngreso.value = true;
     const { data } = await http.post(`/api/solicitudes-referencia/${s.id}/completado`, {
       numero_ingreso: numero,
+      correos_extra: correosExtraIngreso.value,
     });
     notify.success('Solicitud completada');
     const idx = solicitudes.value.findIndex(x => x.id === s.id);
@@ -2341,6 +2391,13 @@ const MOTIVOS_NO_INGRESO = [
 ];
 const numeroIngresoManual = ref('');
 const motivoNoIngreso = ref('');
+const correosExtraIngreso = ref<string[]>([]);
+
+/** Correo al que se notifica la clínica (registrado en la clínica o el de contacto de la solicitud). */
+const correoDestinoClinica = computed(() =>
+  solicitudSeleccionada.value?.clinica?.email
+  || solicitudSeleccionada.value?.correo_contacto
+  || 'La clínica no tiene correo registrado');
 
 /** Registra que el paciente en espera nunca llegó — cierra la referencia con el motivo elegido. */
 async function registrarNoIngreso() {
@@ -2353,6 +2410,7 @@ async function registrarNoIngreso() {
     procesandoIngreso.value = true;
     const { data } = await http.post(`/api/solicitudes-referencia/${s.id}/no-ingreso`, {
       motivo_no_ingreso: motivoNoIngreso.value,
+      correos_extra: correosExtraIngreso.value,
     });
     notify.success(data.message || 'Se registró que el paciente no llegó');
     // Sale de la cola activa (queda negada) — se quita de la lista.
@@ -2410,6 +2468,7 @@ function abrirAceptar(s: Solicitud) {
     hora_llegada: '',
     lugar_llegada: '',
     observaciones_respuesta: '',
+    correos_extra: [],
   };
   soportesAceptar.value = [];
   modalAceptar.value = true;
@@ -2537,6 +2596,7 @@ function abrirCambiar(s: Solicitud) {
     lugar_llegada: '',
     numero_ingreso: '',
     eps: s.eps || '',
+    correos_extra: [],
   };
   modalCambiar.value = true;
 }
@@ -2636,6 +2696,7 @@ function abrirNegar(s: Solicitud) {
     eps: s.eps || '',
     nombre_quien_responde: authStore.user?.full_name ?? '',
     observaciones_respuesta: '',
+    correos_extra: [],
   };
   soportesNegar.value = [];
   modalNegar.value = true;
@@ -2670,7 +2731,13 @@ async function aceptar() {
   try {
     procesando.value = true;
     const body = new FormData();
-    Object.entries(formAceptar.value).forEach(([campo, valor]) => body.append(campo, typeof valor === 'boolean' ? (valor ? '1' : '0') : String(valor ?? '')));
+    Object.entries(formAceptar.value).forEach(([campo, valor]) => {
+      if (Array.isArray(valor)) {
+        valor.forEach((v) => body.append(`${campo}[]`, String(v)));
+      } else {
+        body.append(campo, typeof valor === 'boolean' ? (valor ? '1' : '0') : String(valor ?? ''));
+      }
+    });
     soportesAceptar.value.forEach((soporte) => body.append('soportes[]', soporte));
     const { data } = await http.post(`/api/solicitudes-referencia/${solicitudSeleccionada.value!.id}/aceptar`, body, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -2694,7 +2761,13 @@ async function negar() {
   try {
     procesando.value = true;
     const body = new FormData();
-    Object.entries(formNegar.value).forEach(([campo, valor]) => body.append(campo, valor ?? ''));
+    Object.entries(formNegar.value).forEach(([campo, valor]) => {
+      if (Array.isArray(valor)) {
+        valor.forEach((v) => body.append(`${campo}[]`, String(v)));
+      } else {
+        body.append(campo, valor ?? '');
+      }
+    });
     soportesNegar.value.forEach((soporte) => body.append('soportes[]', soporte));
     const { data } = await http.post(`/api/solicitudes-referencia/${solicitudSeleccionada.value!.id}/negar`, body, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -4356,6 +4429,9 @@ usePolling(() => {
 }
 .accion-required { color: #dc2626; }
 .accion-field-hint { font-size: .62rem; color: #94a3b8; margin: .25rem 0 0; line-height: 1.4; }
+.correo-destino-row { display: flex; align-items: center; gap: 8px; }
+.correo-destino-chip { flex: none; max-width: 46%; overflow: hidden; padding: 5px 10px; border: 1px dashed #bfcfe8; border-radius: 8px; background: #f2f7ff; color: #315583; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.dark .correo-destino-chip { border-color: #314666; background: #1c2d46; color: #9dc1f7; }
 .negar-grupo-btns { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
 .negar-grupo-btn {
   display: flex;

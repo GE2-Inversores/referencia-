@@ -14,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Mail\Message;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\Rule;
@@ -84,9 +85,13 @@ class SolicitudReferenciaController extends Controller
             'observaciones_respuesta' => ['nullable', 'string'],
             'soportes' => ['nullable', 'array', 'max:5'],
             'soportes.*' => ['file', 'mimes:pdf,jpg,jpeg,png,gif,webp,bmp,tiff,svg,doc,docx,xls,xlsx,ppt,pptx,txt,csv,zip,rar', 'max:10240'],
+            'correo_extra' => ['nullable', 'email', 'max:150'],
+            'correos_extra' => ['nullable', 'array', 'max:10'],
+            'correos_extra.*' => ['email', 'max:150'],
         ]);
 
         $this->guardarSoportes($solicitud, $validated['soportes'] ?? []);
+        $destinatarios = $this->destinatariosClinica($solicitud, $this->correosExtraValidados($validated));
 
         if ($sinDisponibilidad) {
             // Aceptada en espera de cupo: queda "pendiente" hasta que haya
@@ -108,13 +113,12 @@ class SolicitudReferenciaController extends Controller
                 'descripcion' => 'La solicitud fue aceptada y quedó en espera de cupo; el código se enviará cuando haya disponibilidad.',
             ]);
 
-            if ($solicitud->correoNotificacion()) {
+            if ($destinatarios !== []) {
                 Mail::send(
                     'emails.solicitud-aceptada-sin-cama',
                     ['solicitud' => $solicitud],
-                    function ($message) use ($solicitud) {
-                        $message->to($solicitud->correoNotificacion())
-                            ->replyTo(config('mail.referencia_interna'), config('mail.referencia_nombre'))
+                    function ($message) use ($solicitud, $destinatarios) {
+                        $this->aplicarReplyTo($message->to($destinatarios))
                             ->subject("Solicitud de referencia ACEPTADA - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                     }
                 );
@@ -153,13 +157,12 @@ class SolicitudReferenciaController extends Controller
             'descripcion' => 'La solicitud fue aceptada y el paciente está en espera de llegada.',
         ]);
 
-        if ($solicitud->correoNotificacion()) {
+        if ($destinatarios !== []) {
             Mail::send(
                 'emails.solicitud-en-espera',
                 ['solicitud' => $solicitud],
-                function ($message) use ($solicitud) {
-                    $message->to($solicitud->correoNotificacion())
-                        ->replyTo(config('mail.referencia_interna'), config('mail.referencia_nombre'))
+                function ($message) use ($solicitud, $destinatarios) {
+                    $this->aplicarReplyTo($message->to($destinatarios))
                         ->subject("Solicitud de referencia ACEPTADA - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                 }
             );
@@ -191,18 +194,21 @@ class SolicitudReferenciaController extends Controller
 
         $validated = $request->validate([
             'mensaje' => ['nullable', 'string', 'max:1000'],
+            'correo_extra' => ['nullable', 'email', 'max:150'],
+            'correos_extra' => ['nullable', 'array', 'max:10'],
+            'correos_extra.*' => ['email', 'max:150'],
         ]);
         $mensaje = filled($validated['mensaje'] ?? null) ? trim($validated['mensaje']) : null;
 
         $solicitud->load('clinica');
-        $correo = $solicitud->correoNotificacion();
+        $destinatarios = $this->destinatariosClinica($solicitud, $this->correosExtraValidados($validated));
 
-        if (! $correo) {
+        if ($destinatarios === []) {
             return response()->json(['message' => 'La clínica de esta solicitud no tiene un correo registrado.'], 422);
         }
 
         try {
-            Mail::to($correo)->send(new SolicitudEvolucionClinica($solicitud, $mensaje));
+            Mail::to($destinatarios)->send(new SolicitudEvolucionClinica($solicitud, $mensaje));
         } catch (Throwable $e) {
             Log::error('No se pudo enviar la solicitud de evolución', [
                 'solicitud_id' => $solicitud->id,
@@ -216,7 +222,7 @@ class SolicitudReferenciaController extends Controller
             'solicitud_referencia_id' => $solicitud->id,
             'tipo' => 'evolucion_solicitada',
             'titulo' => 'Evolución solicitada',
-            'descripcion' => "El equipo de referencia pidió por correo la evolución del paciente a {$correo}.".($mensaje ? " Mensaje: {$mensaje}" : ''),
+            'descripcion' => 'El equipo de referencia pidió por correo la evolución del paciente a '.implode(', ', $destinatarios).'.'.($mensaje ? " Mensaje: {$mensaje}" : ''),
         ]);
 
         $this->notificarClinica(
@@ -226,7 +232,7 @@ class SolicitudReferenciaController extends Controller
             'warning',
         );
 
-        return response()->json(['data' => $solicitud->load('eventos'), 'message' => "Solicitud de evolución enviada a {$correo}"]);
+        return response()->json(['data' => $solicitud->load('eventos'), 'message' => 'Solicitud de evolución enviada a '.implode(', ', $destinatarios)]);
     }
 
     public function negar(Request $request, SolicitudReferencia $solicitud): JsonResponse
@@ -246,7 +252,12 @@ class SolicitudReferenciaController extends Controller
             'observaciones_respuesta' => ['nullable', 'string'],
             'soportes' => ['nullable', 'array', 'max:5'],
             'soportes.*' => ['file', 'mimes:pdf,jpg,jpeg,png,gif,webp,bmp,tiff,svg,doc,docx,xls,xlsx,ppt,pptx,txt,csv,zip,rar', 'max:10240'],
+            'correo_extra' => ['nullable', 'email', 'max:150'],
+            'correos_extra' => ['nullable', 'array', 'max:10'],
+            'correos_extra.*' => ['email', 'max:150'],
         ]);
+
+        $destinatarios = $this->destinatariosClinica($solicitud, $this->correosExtraValidados($validated));
 
         $solicitud->update([
             'estado' => 'negado',
@@ -262,13 +273,12 @@ class SolicitudReferenciaController extends Controller
 
         $solicitud->load('clinica');
 
-        if ($solicitud->correoNotificacion()) {
+        if ($destinatarios !== []) {
             Mail::send(
                 'emails.solicitud-negada',
                 ['solicitud' => $solicitud],
-                function ($message) use ($solicitud) {
-                    $message->to($solicitud->correoNotificacion())
-                        ->replyTo(config('mail.referencia_interna'), config('mail.referencia_nombre'))
+                function ($message) use ($solicitud, $destinatarios) {
+                    $this->aplicarReplyTo($message->to($destinatarios))
                         ->subject("Solicitud de referencia NEGADA - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                 }
             );
@@ -321,6 +331,9 @@ class SolicitudReferenciaController extends Controller
             // (espera/cupo) o al negarla; al completar se conserva la que hay.
             'eps' => ['nullable', Rule::requiredIf(fn () => in_array($request->input('estado'), ['en_espera', 'pendiente_cama', 'negado'], true)), 'string', 'max:120'],
             'numero_ingreso' => ['nullable', Rule::requiredIf(fn () => $request->input('estado') === 'completado'), 'integer'],
+            'correo_extra' => ['nullable', 'email', 'max:150'],
+            'correos_extra' => ['nullable', 'array', 'max:10'],
+            'correos_extra.*' => ['email', 'max:150'],
         ]);
 
         $estadoAnterior = $solicitud->estado;
@@ -349,7 +362,9 @@ class SolicitudReferenciaController extends Controller
             'descripcion' => "Cambio manual. Motivo: {$validated['motivo']}",
         ]);
 
-        if ($solicitud->correoNotificacion()) {
+        $destinatarios = $this->destinatariosClinica($solicitud, $this->correosExtraValidados($validated));
+
+        if ($destinatarios !== []) {
             Mail::send(
                 'emails.solicitud-cambio-estado',
                 [
@@ -357,9 +372,8 @@ class SolicitudReferenciaController extends Controller
                     'estadoNuevo' => $labels[$validated['estado']],
                     'motivo' => $validated['motivo'],
                 ],
-                function ($message) use ($solicitud) {
-                    $message->to($solicitud->correoNotificacion())
-                        ->replyTo(config('mail.referencia_interna'), config('mail.referencia_nombre'))
+                function ($message) use ($solicitud, $destinatarios) {
+                    $this->aplicarReplyTo($message->to($destinatarios))
                         ->subject("Cambio de estado en su solicitud - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                 }
             );
@@ -466,6 +480,9 @@ class SolicitudReferenciaController extends Controller
         $validated = $request->validate([
             'observaciones_respuesta' => ['nullable', 'string'],
             'numero_ingreso' => ['required', 'integer'],
+            'correo_extra' => ['nullable', 'email', 'max:150'],
+            'correos_extra' => ['nullable', 'array', 'max:10'],
+            'correos_extra.*' => ['email', 'max:150'],
         ]);
 
         $solicitud->update([
@@ -483,13 +500,14 @@ class SolicitudReferenciaController extends Controller
             'descripcion' => "El paciente llegó a la institución (ingreso Gomedisys #{$validated['numero_ingreso']}) y fue atendido.",
         ]);
 
-        if ($solicitud->correoNotificacion()) {
+        $destinatarios = $this->destinatariosClinica($solicitud, $this->correosExtraValidados($validated));
+
+        if ($destinatarios !== []) {
             Mail::send(
                 'emails.solicitud-completada',
                 ['solicitud' => $solicitud],
-                function ($message) use ($solicitud) {
-                    $message->to($solicitud->correoNotificacion())
-                        ->replyTo(config('mail.referencia_interna'), config('mail.referencia_nombre'))
+                function ($message) use ($solicitud, $destinatarios) {
+                    $this->aplicarReplyTo($message->to($destinatarios))
                         ->subject("Solicitud de referencia COMPLETADA - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                 }
             );
@@ -527,6 +545,9 @@ class SolicitudReferenciaController extends Controller
 
         $validated = $request->validate([
             'motivo_no_ingreso' => ['required', 'string', 'max:250'],
+            'correo_extra' => ['nullable', 'email', 'max:150'],
+            'correos_extra' => ['nullable', 'array', 'max:10'],
+            'correos_extra.*' => ['email', 'max:150'],
         ]);
 
         $solicitud->update([
@@ -546,13 +567,14 @@ class SolicitudReferenciaController extends Controller
             'descripcion' => 'El paciente no se presentó a la institución. Motivo de no ingreso: '.$validated['motivo_no_ingreso'],
         ]);
 
-        if ($solicitud->correoNotificacion()) {
+        $destinatarios = $this->destinatariosClinica($solicitud, $this->correosExtraValidados($validated));
+
+        if ($destinatarios !== []) {
             Mail::send(
                 'emails.solicitud-negada',
                 ['solicitud' => $solicitud],
-                function ($message) use ($solicitud) {
-                    $message->to($solicitud->correoNotificacion())
-                        ->replyTo(config('mail.referencia_interna'), config('mail.referencia_nombre'))
+                function ($message) use ($solicitud, $destinatarios) {
+                    $this->aplicarReplyTo($message->to($destinatarios))
                         ->subject("Solicitud de referencia NEGADA - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                 }
             );
@@ -641,6 +663,57 @@ class SolicitudReferenciaController extends Controller
                 'tamano' => $soporte->getSize(),
             ]);
         }
+    }
+
+    /**
+     * Correos adicionales escritos por el operador — acepta la lista
+     * correos_extra (input de tags) y el correo_extra único por compat.
+     *
+     * @param  array<string, mixed>  $validated
+     * @return array<int, string>
+     */
+    private function correosExtraValidados(array $validated): array
+    {
+        $extras = $validated['correos_extra'] ?? [];
+
+        if (! is_array($extras)) {
+            $extras = [$extras];
+        }
+
+        $extras[] = $validated['correo_extra'] ?? null;
+
+        return array_values(array_filter(array_map(
+            static fn (mixed $correo): string => trim((string) $correo),
+            $extras,
+        )));
+    }
+
+    /**
+     * Destinatarios del correo a la clínica: su correo registrado más los
+     * correos adicionales que el operador escribe en el formulario.
+     *
+     * @param  array<int, string>  $correosExtra
+     * @return array<int, string>
+     */
+    private function destinatariosClinica(SolicitudReferencia $solicitud, array $correosExtra): array
+    {
+        return array_values(array_unique(array_filter([
+            $solicitud->correoNotificacion(),
+            ...$correosExtra,
+        ])));
+    }
+
+    /**
+     * Agrega el Reply-To configurado al mensaje — cuando el setting queda
+     * vacío el correo sale sin encabezado Reply-To.
+     */
+    private function aplicarReplyTo(Message $message): Message
+    {
+        if ($replyTo = config('mail.saliente_reply_to')) {
+            $message->replyTo($replyTo, config('mail.saliente_reply_to_nombre'));
+        }
+
+        return $message;
     }
 
     private function notificarClinica(SolicitudReferencia $solicitud, string $titulo, string $mensaje, string $tipo = 'info'): void

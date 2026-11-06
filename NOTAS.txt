@@ -31,3 +31,38 @@ cauntos refirieron para torre y urgencias
 espcialidades negadas 
 
 
+
+servicios 
+UCI
+UCIN
+hospitalizacion 2do
+hospitalizacion 8vo
+hospitalizacion 7mo
+
+translado redondo 
+angiografia/hemodinamia 
+
+1. informacion del informe
+-pacientes referidos 
+-poblacion objeto y poblacion no red
+-pendiente por aceptar 
+-paciente aceptados 
+-pacientes con ingreso efetivos 
+-pacientes con ingreso no efetivos no motivo de ingreso
+-pacientes negados motivo de negacion 
+-municipio de origen 
+-clnica que referenica 
+- especialidad que referenica
+
+
+
+
+redondo o integral 
+
+
+2. en la vista previa mostrar a que servicio refiere 
+3. en la todos los estados traer el correo y poder adjutar  otro correo y se envie 
+
+
+
+

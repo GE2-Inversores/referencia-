@@ -27,6 +27,8 @@ class SettingSeeder extends Seeder
             ['key' => 'mail_password', 'value' => null, 'group' => 'mail', 'type' => 'string'],
             ['key' => 'mail_from_address', 'value' => 'noreply@example.com', 'group' => 'mail', 'type' => 'string'],
             ['key' => 'mail_from_name', 'value' => 'Clínica Santa Bárbara', 'group' => 'mail', 'type' => 'string'],
+            ['key' => 'mail_reply_to_address', 'value' => env('MAIL_REFERENCIA_INTERNA', 'referencia@cacsantabarbara.co'), 'group' => 'mail', 'type' => 'string'],
+            ['key' => 'mail_reply_to_name', 'value' => env('MAIL_REFERENCIA_NOMBRE', 'Referencia CACSB'), 'group' => 'mail', 'type' => 'string'],
             // AWS SES
             ['key' => 'ses_key', 'value' => null, 'group' => 'mail', 'type' => 'string'],
             ['key' => 'ses_secret', 'value' => null, 'group' => 'mail', 'type' => 'string'],
@@ -37,6 +39,8 @@ class SettingSeeder extends Seeder
             ['key' => 'mailgun_endpoint', 'value' => 'api.mailgun.net', 'group' => 'mail', 'type' => 'string'],
             // Postmark
             ['key' => 'postmark_token', 'value' => null, 'group' => 'mail', 'type' => 'string'],
+            // Resend
+            ['key' => 'resend_key', 'value' => null, 'group' => 'mail', 'type' => 'string'],
 
             // API
             ['key' => 'api_rate_limit', 'value' => '60', 'group' => 'api', 'type' => 'integer'],

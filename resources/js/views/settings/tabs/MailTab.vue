@@ -9,6 +9,7 @@
         <el-option label="AWS SES" value="ses" />
         <el-option label="Mailgun" value="mailgun" />
         <el-option label="Postmark" value="postmark" />
+        <el-option label="Resend" value="resend" />
         <el-option label="Sendmail (Local)" value="sendmail" />
         <el-option label="Log (Solo testing)" value="log" />
       </el-select>
@@ -25,7 +26,16 @@
         <label class="block text-sm font-medium text-gray-700 mb-1.5">Nombre remitente</label>
         <el-input v-model="form.mail_from_name" placeholder="Sistema" />
       </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">Responder a (Reply-To)</label>
+        <el-input v-model="form.mail_reply_to_address" type="email" placeholder="referencia@example.com" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">Nombre de respuesta</label>
+        <el-input v-model="form.mail_reply_to_name" placeholder="Referencia" />
+      </div>
     </div>
+    <p class="text-xs text-gray-400 -mt-2">Los correos de la aplicación llevan este Reply-To con cualquier servicio (SMTP, Resend, SES, Mailgun, Postmark…); las respuestas de las clínicas llegan a esta dirección. Si queda vacío, los correos salen sin Reply-To.</p>
 
     <!-- Campos SMTP / Mailpit -->
     <template v-if="form.mail_mailer === 'smtp' || form.mail_mailer === 'mailpit'">
@@ -128,6 +138,22 @@
       </div>
     </template>
 
+    <!-- Campos Resend -->
+    <template v-if="form.mail_mailer === 'resend'">
+      <div class="border-t border-gray-100 pt-4">
+        <h4 class="text-sm font-semibold text-gray-800 mb-4">Configuración Resend</h4>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1.5">API Key</label>
+            <el-input v-model="form.resend_key" type="password" show-password placeholder="re_..." />
+          </div>
+        </div>
+      </div>
+      <el-alert type="info" :closable="false" show-icon>
+        Resend envía por API, no por SMTP. El correo remitente debe pertenecer a un dominio verificado en tu cuenta de Resend.
+      </el-alert>
+    </template>
+
     <!-- Info para Mailpit -->
     <template v-if="form.mail_mailer === 'mailpit'">
       <el-alert type="info" :closable="false" show-icon>
@@ -224,6 +250,8 @@ const form = reactive({
   mail_password: '',
   mail_from_address: '',
   mail_from_name: '',
+  mail_reply_to_address: '',
+  mail_reply_to_name: '',
   ses_key: '',
   ses_secret: '',
   ses_region: 'us-east-1',
@@ -231,6 +259,7 @@ const form = reactive({
   mailgun_secret: '',
   mailgun_endpoint: 'api.mailgun.net',
   postmark_token: '',
+  resend_key: '',
 });
 
 function loadForm() {
@@ -242,6 +271,8 @@ function loadForm() {
   form.mail_password = settingsStore.getSettingValue('mail', 'mail_password', '');
   form.mail_from_address = settingsStore.getSettingValue('mail', 'mail_from_address', '');
   form.mail_from_name = settingsStore.getSettingValue('mail', 'mail_from_name', '');
+  form.mail_reply_to_address = settingsStore.getSettingValue('mail', 'mail_reply_to_address', '');
+  form.mail_reply_to_name = settingsStore.getSettingValue('mail', 'mail_reply_to_name', '');
   form.ses_key = settingsStore.getSettingValue('mail', 'ses_key', '');
   form.ses_secret = settingsStore.getSettingValue('mail', 'ses_secret', '');
   form.ses_region = settingsStore.getSettingValue('mail', 'ses_region', 'us-east-1');
@@ -249,6 +280,7 @@ function loadForm() {
   form.mailgun_secret = settingsStore.getSettingValue('mail', 'mailgun_secret', '');
   form.mailgun_endpoint = settingsStore.getSettingValue('mail', 'mailgun_endpoint', 'api.mailgun.net');
   form.postmark_token = settingsStore.getSettingValue('mail', 'postmark_token', '');
+  form.resend_key = settingsStore.getSettingValue('mail', 'resend_key', '');
 }
 
 loadForm();

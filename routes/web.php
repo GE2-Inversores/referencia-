@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\ClinicaController;
 use App\Http\Controllers\Api\CurrentUserController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\IdentificationTypeController;
+use App\Http\Controllers\Api\InformeController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\RoleController;
@@ -61,6 +62,9 @@ Route::prefix('api')->name('api.')->group(function (): void {
         // lateral de métricas — por eso acepta ambos permisos.
         Route::get('dashboard/stats', [DashboardController::class, 'stats'])->name('dashboard.stats')->middleware('permission:dashboard.view|solicitudes.view');
         Route::get('search', [DashboardController::class, 'search'])->name('search');
+
+        Route::get('informes', [InformeController::class, 'index'])->name('informes.index')->middleware('permission:dashboard.view');
+        Route::get('informes/exportar', [InformeController::class, 'exportar'])->name('informes.exportar')->middleware('permission:dashboard.view');
 
         Route::get('user', CurrentUserController::class)->name('user');
         Route::put('user/profile', [CurrentUserController::class, 'updateProfile'])->name('user.profile.update');

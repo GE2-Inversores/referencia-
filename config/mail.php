@@ -120,11 +120,24 @@ return [
     | Correo interno de referencia
     |--------------------------------------------------------------------------
     |
-    | Destinatario de los avisos internos (nueva solicitud, nueva evolución)
-    | y dirección Reply-To de los correos que salen hacia las clínicas.
+    | Destinatario de los avisos internos (nueva solicitud, nueva evolución).
     |
     */
     'referencia_interna' => env('MAIL_REFERENCIA_INTERNA', 'referencia@cacsantabarbara.co'),
     'referencia_nombre' => env('MAIL_REFERENCIA_NOMBRE', 'Referencia CACSB'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Reply-To de los correos salientes
+    |--------------------------------------------------------------------------
+    |
+    | Se configura desde Ajustes → Correo (settings mail_reply_to_*). Vacío
+    | significa que los correos salen sin encabezado Reply-To. Ojo: no usar
+    | la clave "reply_to" — Laravel la toma como global y la aplicaría dos
+    | veces junto con el replyTo de cada mailable.
+    |
+    */
+    'saliente_reply_to' => env('MAIL_REPLY_TO_ADDRESS', env('MAIL_REFERENCIA_INTERNA', 'referencia@cacsantabarbara.co')),
+    'saliente_reply_to_nombre' => env('MAIL_REPLY_TO_NAME', env('MAIL_REFERENCIA_NOMBRE', 'Referencia CACSB')),
 
 ];

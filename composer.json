@@ -12,6 +12,7 @@
         "laravel/sanctum": "^4.3",
         "laravel/tinker": "^3.0",
         "owen-it/laravel-auditing": "^14.0",
+        "resend/resend-laravel": "^1.7",
         "spatie/laravel-permission": "^7.4"
     },
     "require-dev": {

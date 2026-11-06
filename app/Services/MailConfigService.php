@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Setting;
+use Illuminate\Mail\Mailables\Address;
 use Illuminate\Support\Facades\Config;
 
 class MailConfigService
@@ -35,6 +36,14 @@ class MailConfigService
         Config::set('mail.from.address', $fromAddress);
         Config::set('mail.from.name', $fromName);
 
+        // Reply-To configurable para todos los servicios de correo — los
+        // mailables y los envíos con vista leen mail.saliente_reply_to*;
+        // vacío significa que los correos salen sin Reply-To. Las claves no
+        // pueden llamarse mail.reply_to.*: Laravel las toma como dirección
+        // global (alwaysReplyTo) y el encabezado terminaría duplicado.
+        Config::set('mail.saliente_reply_to', Setting::get('mail_reply_to_address'));
+        Config::set('mail.saliente_reply_to_nombre', Setting::get('mail_reply_to_name'));
+
         // Configurar SES si está disponible
         $sesKey = Setting::get('ses_key');
         $sesSecret = Setting::get('ses_secret');
@@ -63,6 +72,28 @@ class MailConfigService
         if ($postmarkToken) {
             Config::set('services.postmark.token', $postmarkToken);
         }
+
+        // Configurar Resend si está disponible
+        $resendKey = Setting::get('resend_key');
+
+        if ($resendKey) {
+            Config::set('services.resend.key', $resendKey);
+        }
+    }
+
+    /**
+     * Direcciones Reply-To para los mailables — vacío cuando el setting
+     * está vacío (el correo sale sin encabezado Reply-To).
+     *
+     * @return array<int, Address>
+     */
+    public static function replyToAddresses(): array
+    {
+        $address = config('mail.saliente_reply_to');
+
+        return $address !== null && $address !== ''
+            ? [new Address($address, (string) (config('mail.saliente_reply_to_nombre') ?? ''))]
+            : [];
     }
 
     /**

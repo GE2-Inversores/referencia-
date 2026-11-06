@@ -112,6 +112,12 @@ const router = createRouter({
           meta: { permissions: ['dashboard.view'] },
         },
         {
+          path: 'informes',
+          name: 'informes',
+          component: () => import('@/views/informes/InformesView.vue'),
+          meta: { permissions: ['dashboard.view'] },
+        },
+        {
           path: 'reportes',
           name: 'reportes',
           redirect: '/',

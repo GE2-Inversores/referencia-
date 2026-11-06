@@ -176,6 +176,7 @@ const mainItems: NavItem[] = [
   { to: '/solicitudes-referencia', icon: 'ClipboardList', text: 'Solicitudes', permission: 'solicitudes.view' },
   { to: '/clinicas', icon: 'Hospital', text: 'Clínicas', permission: 'clinicas.view' },
   { to: '/historico', icon: 'History', text: 'Historial', permission: 'historico.view' },
+  { to: '/informes', icon: 'ChartColumn', text: 'Informes', permission: 'dashboard.view' },
 ];
 
 const adminItems: NavItem[] = [
