@@ -1,26 +1,5 @@
 <template>
   <div class="inf-page h-full overflow-y-auto p-2 sm:p-3">
-    <!-- ── Encabezado ── -->
-    <div class="inf-head">
-      <div class="inf-head-icon"><component :is="ChartIcon" class="w-5 h-5" /></div>
-      <div class="inf-head-text">
-        <h1>Informes de gestión</h1>
-        <p>Referenciación de pacientes — Indicadores y resultados</p>
-      </div>
-      <DateRangeFilter v-model="rango" />
-      <div class="inf-head-actions">
-        <button type="button" class="inf-btn inf-btn-excel" :disabled="!informe || descargando !== ''" @click="descargarExcel">
-          <component :is="descargando === 'excel' ? LoaderIcon : SheetIcon" class="w-4 h-4" :class="{ 'animate-spin': descargando === 'excel' }" /> Excel
-        </button>
-        <button type="button" class="inf-btn inf-btn-pdf" :disabled="!informe || descargando !== ''" @click="descargarPdf">
-          <component :is="descargando === 'pdf' ? LoaderIcon : FileIcon" class="w-4 h-4" :class="{ 'animate-spin': descargando === 'pdf' }" /> PDF
-        </button>
-        <button type="button" class="inf-btn inf-btn-icon" :disabled="cargando" title="Actualizar" @click="cargar">
-          <component :is="RefreshIcon" class="w-4 h-4" :class="{ 'animate-spin': cargando }" />
-        </button>
-      </div>
-    </div>
-
     <p v-if="error" class="inf-error">{{ error }}</p>
     <div v-if="cargando && !informe" class="inf-loading">Generando informe…</div>
 
@@ -59,13 +38,14 @@
           <span class="inf-panel-icon"><component :is="UsersIcon" class="w-3.5 h-3.5" /></span>
           <h2>Seguimiento diario</h2>
           <small class="inf-seg-hint">Control del estado de las referencias en el período seleccionado</small>
+          <span class="inf-toolbar-label">Seguimiento:</span>
           <DateRangeFilter v-model="rangoSeg" />
         </header>
         <div class="inf-seg-row">
           <div class="inf-seg-left">
             <div class="inf-seg-total">
               <span>Pacientes referidos</span>
-              <strong>{{ informe.resumen.total }}</strong>
+              <strong>{{ datosSeg.resumen.total }}</strong>
             </div>
             <div class="inf-seg-pob">
               <span><i class="inf-dot inf-dot-orange"></i>Población objeto <strong>{{ datosSeg.poblacion.objeto }}</strong> <em>{{ fmtPct(pctDe(datosSeg.poblacion.objeto, datosSeg.resumen.total)) }}</em></span>
@@ -91,6 +71,11 @@
           <header class="inf-head-panel">
             <span class="inf-panel-icon"><component :is="PieIcon" class="w-3.5 h-3.5" /></span>
             <h2>Estado de las solicitudes</h2>
+            <span class="inf-toolbar-label inf-head-space">Informe:</span>
+            <DateRangeFilter v-model="rango" />
+            <button type="button" class="inf-btn inf-btn-icon" :disabled="cargando" title="Actualizar" @click="cargar">
+              <component :is="RefreshIcon" class="w-4 h-4" :class="{ 'animate-spin': cargando }" />
+            </button>
           </header>
           <div class="inf-estados">
             <div v-if="informe.resumen.total > 0" class="inf-donut">
@@ -102,7 +87,7 @@
                 <span class="inf-legend-dot" :style="{ background: c.color }"></span>
                 <span class="inf-legend-name">{{ c.label }}</span>
                 <strong :style="{ color: c.color }">{{ c.total }}</strong>
-                <small class="inf-legend-pct" :style="{ color: c.color, background: c.color + '1f' }">{{ fmtPct(c.pct) }}</small>
+                <small class="inf-legend-pct" :style="{ color: '#fff', background: c.color }">{{ fmtPct(c.pct) }}</small>
               </li>
             </ul>
           </div>
@@ -206,7 +191,6 @@
         </div>
       </section>
 
-
     </template>
   </div>
 </template>
@@ -221,16 +205,12 @@ import {
   Stethoscope as StethoscopeIcon,
   Users as UsersIcon,
   BedDouble as BedIcon,
-  ChartColumn as ChartIcon,
   CheckCircle2 as CheckIcon,
   ClipboardList as ClipboardIcon,
   Cross as CrossIcon,
-  FileText as FileIcon,
   Layers as LayersIcon,
-  Loader2 as LoaderIcon,
   PieChart as PieIcon,
   RefreshCw as RefreshIcon,
-  Sheet as SheetIcon,
   ShieldCheck as ShieldIcon,
   UserX as UserXIcon,
   XCircle as XIcon,
@@ -240,7 +220,7 @@ import StatCard from '@/components/ui/StatCard.vue';
 import http from '@/plugins/axios';
 import notify from '@/plugins/toast';
 import { useLayoutStore } from '@/stores/layout';
-import { exportarInformePdf, type InformeDatos } from '@/lib/exportarInformePdf';
+import type { InformeDatos } from '@/lib/exportarInformePdf';
 
 interface InformeCompleto extends InformeDatos {
   por_estado: (InformeDatos['por_estado'][number] & { estado: string })[];
@@ -276,16 +256,16 @@ const cargandoSeg = ref(false);
 const datosSeg = computed<InformeCompleto>(() => informeSeg.value ?? informe.value!);
 const cargando = ref(false);
 const error = ref('');
-const descargando = ref<'' | 'excel' | 'pdf'>('');
 
 const parametros = (r: [string, string] | null = rango.value) => (r ? { desde: r[0], hasta: r[1] } : {});
 
 async function cargarSeg(): Promise<void> {
   cargandoSeg.value = true;
   try {
-    const { data } = await axios.get<{ data: InformeCompleto }>('/api/informes', { params: parametros(rangoSeg.value) });
+    const { data } = await http.get<{ data: InformeCompleto }>('/api/informes', { params: parametros(rangoSeg.value) });
     informeSeg.value = data.data;
   } catch {
+    notify.error('No se pudo actualizar el seguimiento.');
     informeSeg.value = informe.value;
   } finally {
     cargandoSeg.value = false;
@@ -302,34 +282,6 @@ async function cargar(): Promise<void> {
     error.value = e?.response?.data?.message ?? 'No se pudo generar el informe.';
   } finally {
     cargando.value = false;
-  }
-}
-
-async function descargarExcel(): Promise<void> {
-  descargando.value = 'excel';
-  try {
-    const { data } = await http.get('/api/informes/exportar', { params: parametros(), responseType: 'blob' });
-    const enlace = document.createElement('a');
-    enlace.href = URL.createObjectURL(data);
-    enlace.download = `informe-referencias_${informe.value?.periodo.desde}_${informe.value?.periodo.hasta}.xlsx`;
-    enlace.click();
-    URL.revokeObjectURL(enlace.href);
-  } catch {
-    notify.error('No se pudo descargar el Excel.');
-  } finally {
-    descargando.value = '';
-  }
-}
-
-async function descargarPdf(): Promise<void> {
-  if (!informe.value) return;
-  descargando.value = 'pdf';
-  try {
-    await exportarInformePdf(informe.value);
-  } catch {
-    notify.error('No se pudo generar el PDF.');
-  } finally {
-    descargando.value = '';
   }
 }
 
@@ -464,6 +416,7 @@ const opcionesDonut = computed(() => ({
 }));
 
 watch(rango, () => { void cargar(); });
+watch(rangoSeg, () => { void cargarSeg(); });
 onMounted(cargar);
 </script>
 
@@ -472,24 +425,14 @@ onMounted(cargar);
 .dark .inf-page { background: transparent; }
 
 /* ── Encabezado ── */
-.inf-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; padding: 10px 14px; border: 1px solid #86a5d8; border-radius: 18px; background: rgba(255,255,255,.88); box-shadow: 0 8px 24px rgba(22,70,142,.15); }
-.dark .inf-head { border-color: rgba(255,255,255,.07); background: #161b28; box-shadow: none; }
-.inf-head-icon { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 13px; background: linear-gradient(135deg, #2563eb, #1e40af); color: #fff; box-shadow: 0 6px 14px rgba(37,99,235,.35); }
-.inf-head-text { flex: 1 1 240px; min-width: 0; }
-.inf-head-text h1 { margin: 0; color: #0d2d5e; font-size: 19px; font-weight: 800; letter-spacing: -.01em; }
-.inf-head-text p { margin: 1px 0 0; color: #64748b; font-size: 11.5px; }
-.dark .inf-head-text h1 { color: #e5eeff; }
-.inf-head-actions { display: flex; gap: 6px; }
+.inf-toolbar-label { color: #64748b; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.dark .inf-toolbar-label { color: #8fa4c4; }
 
 .inf-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 32px; padding: 5px 12px; border: 1.5px solid #dbe6f5; border-radius: 11px; background: rgba(255,255,255,.92); color: #315583; font-size: 12px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 6px rgba(22,70,142,.07); transition: all .15s ease; }
 .inf-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 5px 12px rgba(22,70,142,.12); }
 .inf-btn:disabled { opacity: .5; cursor: not-allowed; }
 .inf-btn-icon { width: 32px; padding: 6px; border-color: #bfd4f5; color: #2563eb; background: linear-gradient(135deg, #e4efff, #f4f8ff); }
-.inf-btn-excel { border-color: #86d3a0; background: linear-gradient(135deg, #dcf7e5, #f2fcf5); color: #15803d; }
-.inf-btn-pdf { border-color: #f1a5a5; background: linear-gradient(135deg, #fde9e9, #fff5f5); color: #dc2626; }
 .dark .inf-btn { border-color: #314666; background: #1c2d46; color: #bcd1ef; }
-.dark .inf-btn-excel { border-color: #1f5c3a; background: #12301f; color: #86efac; }
-.dark .inf-btn-pdf { border-color: #6b2434; background: #2b1620; color: #fda4af; }
 
 .inf-error { margin: 0 0 10px; padding: 10px 12px; border: 1px solid #fecaca; border-radius: 10px; background: #fef2f2; color: #b91c1c; font-size: 12px; }
 .inf-loading { padding: 60px 0; color: #64748b; text-align: center; font-size: 13px; }
@@ -501,44 +444,49 @@ onMounted(cargar);
 /* ── Seguimiento diario ── */
 .inf-seg { margin-bottom: 6px; }
 .inf-panel.inf-seg { z-index: 30; overflow: visible; }
+.inf-hero > .inf-panel:first-child { z-index: 25; overflow: visible; }
 .inf-seg-hint { color: #94a3b8; font-size: 10px; font-weight: 600; }
+.inf-head-space { margin-left: auto; }
 .inf-seg-row { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: stretch; }
 .inf-seg-left { display: flex; align-items: center; gap: 20px; padding: 10px 18px; border: 1px solid #c3d6f2; border-radius: 13px; background: linear-gradient(150deg, #f1f7ff, #f9fcff); }
 .dark .inf-seg-left { border-color: #2c3f5e; background: #131a28; }
 .inf-seg-total { display: flex; min-width: 96px; flex-direction: column; }
 .inf-seg-total span { color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
 .dark .inf-seg-total span { color: #93a5c0; }
-.inf-seg-total strong { color: #1d4ed8; font-size: 30px; font-weight: 800; line-height: 1.05; }
-.dark .inf-seg-total strong { color: #93c5fd; }
+.inf-seg-total strong { font-size: 30px; font-weight: 800; line-height: 1.05; background: linear-gradient(135deg, #3b82f6, #4f46e5); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.dark .inf-seg-total strong { background: linear-gradient(135deg, #93c5fd, #a5b4fc); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .inf-seg-pob { display: flex; min-width: 150px; flex-direction: column; gap: 3px; font-size: 11px; }
 .inf-seg-pob span { display: inline-flex; align-items: center; gap: 5px; color: #475569; font-weight: 600; }
-.inf-seg-pob strong { color: #0d2d5e; font-weight: 800; }
+.inf-seg-pob strong { font-weight: 800; }
+.inf-seg-pob span:nth-of-type(1) strong { color: #ea580c; }
+.inf-seg-pob span:nth-of-type(2) strong { color: #2563eb; }
 .inf-seg-pob em { color: #94a3b8; font-style: normal; font-weight: 700; }
 .dark .inf-seg-pob span { color: #cbd5e1; } .dark .inf-seg-pob strong { color: #e2ecfc; }
 .inf-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
 .inf-dot-orange { background: #fb923c; } .inf-dot-blue { background: #3b82f6; }
 .inf-seg-cards { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 6px; }
-.inf-seg-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 16px; border: 1px solid #86a5d8; box-shadow: 0 8px 24px rgba(22,70,142,.18); min-width: 0; transition: transform .15s ease, box-shadow .15s ease; }
+.inf-seg-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 16px; border: 1px solid rgba(255,255,255,.35); box-shadow: 0 8px 24px rgba(22,70,142,.18); min-width: 0; transition: transform .15s ease, box-shadow .15s ease; }
 .inf-seg-card:hover { transform: translateY(-1px); box-shadow: 0 10px 26px rgba(22,70,142,.2); }
 .dark .inf-seg-card:hover { transform: none; }
-.dark .inf-seg-card { border-color: rgba(255,255,255,.07); box-shadow: none; }
-.seg-amber { background: linear-gradient(135deg, #fff7e8, #fffdf6); } .seg-amber .inf-seg-icon { background: #fef0d3; color: #d97706; }
-.seg-green { background: linear-gradient(135deg, #e8faf0, #f6fdf9); } .seg-green .inf-seg-icon { background: #d3f4e0; color: #16a34a; }
-.seg-blue { background: linear-gradient(135deg, #e8f1ff, #f5f9ff); } .seg-blue .inf-seg-icon { background: #d5e5ff; color: #2563eb; }
-.seg-rose { background: linear-gradient(135deg, #fdeeee, #fdf7f7); } .seg-rose .inf-seg-icon { background: #fcd9d9; color: #e11d48; }
-.seg-red { background: linear-gradient(135deg, #fdeeee, #fdf7f7); } .seg-red .inf-seg-icon { background: #fcd9d9; color: #dc2626; }
-.dark .inf-seg-card.seg-amber { background: #2f2716; } .dark .inf-seg-card.seg-green { background: #14291d; }
-.dark .inf-seg-card.seg-blue { background: #15263f; } .dark .inf-seg-card.seg-rose, .dark .inf-seg-card.seg-red { background: #2d1a1e; }
+.dark .inf-seg-card { border-color: rgba(255,255,255,.18); }
+.seg-amber { background: linear-gradient(135deg, #fcd34d, #f59e0b); box-shadow: 0 8px 22px rgba(245,158,11,.28); }
+.seg-green { background: linear-gradient(135deg, #86efac, #22c55e); box-shadow: 0 8px 22px rgba(34,197,94,.28); }
+.seg-blue { background: linear-gradient(135deg, #93c5fd, #3b82f6); box-shadow: 0 8px 22px rgba(59,130,246,.28); }
+.seg-rose { background: linear-gradient(135deg, #fda4af, #f43f5e); box-shadow: 0 8px 22px rgba(244,63,94,.26); }
+.seg-red { background: linear-gradient(135deg, #fca5a5, #ef4444); box-shadow: 0 8px 22px rgba(239,68,68,.28); }
+.inf-seg-card .inf-seg-icon { background: rgba(255,255,255,.26); border: 1px solid rgba(255,255,255,.45); color: #fff; }
+.inf-seg-card .inf-seg-body span { color: rgba(255,255,255,.88); }
+.inf-seg-card .inf-seg-body em { color: rgba(255,255,255,.8); }
+.inf-seg-card .inf-seg-body strong { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.18); }
 .inf-seg-icon { display: grid; width: 38px; height: 38px; flex-shrink: 0; place-items: center; border-radius: 12px; }
 .inf-seg-body { display: flex; min-width: 0; flex-direction: column; }
 .inf-seg-body span { overflow: hidden; color: #64748b; font-size: 10.5px; font-weight: 700; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
 .dark .inf-seg-body span { color: #93a5c0; }
 .inf-seg-body strong { color: #0d2d5e; font-size: 20px; font-weight: 800; line-height: 1.1; }
-.seg-amber .inf-seg-body strong { color: #d97706; } .seg-green .inf-seg-body strong { color: #16a34a; }
-.seg-blue .inf-seg-body strong { color: #2563eb; } .seg-rose .inf-seg-body strong, .seg-red .inf-seg-body strong { color: #dc2626; }
 .dark .inf-seg-body strong { color: #e2ecfc; }
-.dark .seg-amber .inf-seg-body strong { color: #fbbf24; } .dark .seg-green .inf-seg-body strong { color: #4ade80; }
-.dark .seg-blue .inf-seg-body strong { color: #93c5fd; } .dark .seg-rose .inf-seg-body strong, .dark .seg-red .inf-seg-body strong { color: #f87171; }
+.dark .inf-seg-card .inf-seg-body strong { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.18); }
+.dark .inf-seg-card .inf-seg-body span { color: rgba(255,255,255,.88); }
+.dark .inf-seg-card .inf-seg-body em { color: rgba(255,255,255,.8); }
 .inf-seg-body em { margin-top: 1px; color: #64748b; font-size: 9.5px; font-style: normal; font-weight: 700; }
 @media (max-width: 1400px) { .inf-seg { grid-template-columns: 1fr; } .inf-seg-cards { grid-template-columns: repeat(5, minmax(0,1fr)); } }
 @media (max-width: 900px) { .inf-seg-cards { grid-template-columns: repeat(2, minmax(0,1fr)); } }
@@ -551,7 +499,7 @@ onMounted(cargar);
 .dark .inf-esp-col { border-color: #263352; background: #1a2233; }
 .inf-esp-name { display: block; overflow: hidden; color: #475569; font-size: 10.5px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .dark .inf-esp-name { color: #93a5c0; }
-.inf-esp-col strong { color: #0d2d5e; font-size: 15px; font-weight: 800; }
+.inf-esp-col strong { color: #1d4ed8; font-size: 15px; font-weight: 800; }
 .dark .inf-esp-col strong { color: #e2ecfc; }
 .inf-esp-col strong small { color: #64748b; font-size: 9.5px; font-weight: 700; }
 @media (max-width: 900px) { .inf-esp { grid-template-columns: repeat(2, minmax(0,1fr)); } }
@@ -574,7 +522,7 @@ onMounted(cargar);
 .inf-panel:hover { box-shadow: 0 12px 30px rgba(22,70,142,.22), inset 0 1px 0 rgba(255,255,255,.9); }
 .dark .inf-panel { border-color: rgba(255,255,255,.07); background: #161b28; box-shadow: none; }
 .dark .inf-panel:hover { box-shadow: none; }
-.inf-head-panel { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #edf2f9; }
+.inf-head-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #edf2f9; }
 .dark .inf-head-panel { border-color: #22304a; }
 .inf-head-panel h2 { margin: 0; flex: 1; color: #0d2d5e; font-size: 12.5px; font-weight: 800; }
 .dark .inf-head-panel h2 { color: #dbe7fb; }
@@ -622,14 +570,14 @@ onMounted(cargar);
 .inf-ind-icon { display: grid; width: 22px; height: 22px; flex-shrink: 0; place-items: center; border-radius: 8px; }
 .inf-ind-label { flex: 1; color: #334155; font-size: 11px; font-weight: 600; }
 .inf-ind-pill { min-width: 32px; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; text-align: center; }
-.inf-ind-green { background: #dcfce7; color: #15803d; }
-.inf-ind-red { background: #fee2e2; color: #dc2626; }
-.inf-ind-orange { background: #ffedd5; color: #c2410c; }
-.dark .inf-ind-orange { background: #4a2a12; color: #fdba74; }
+.inf-ind-green { background: #16a34a; color: #fff; }
+.inf-ind-red { background: #dc2626; color: #fff; }
+.inf-ind-orange { background: #ea580c; color: #fff; }
 .dark .inf-indicators li { border-color: #263352; background: #1a2233; }
 .dark .inf-ind-label { color: #cbd5e1; }
-.dark .inf-ind-green { background: #14391f; color: #86efac; }
-.dark .inf-ind-red { background: #4c1d24; color: #fda4af; }
+.dark .inf-ind-green { background: #16a34a; color: #fff; }
+.dark .inf-ind-red { background: #dc2626; color: #fff; }
+.dark .inf-ind-orange { background: #ea580c; color: #fff; }
 
 /* ── Listas de categorías (4 desgloses) ── */
 .inf-cat { display: flex; flex-direction: column; gap: 5px; margin: 0; padding: 0 2px 0 0; list-style: none; max-height: 176px; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-color: transparent transparent; }
@@ -649,10 +597,10 @@ onMounted(cargar);
 .inf-cat strong { min-width: 16px; color: #0d2d5e; font-size: 11px; font-weight: 800; text-align: right; }
 .dark .inf-cat strong { color: #e2ecfc; }
 .inf-cat-pct { flex: 0 0 42px; padding: 1px 0; border-radius: 999px; font-size: 9.5px; font-weight: 800; text-align: center; }
-.inf-cat-pill-green { background: #dcfce7; color: #15803d; }
-.inf-cat-pill-red { background: #fee2e2; color: #dc2626; }
-.inf-cat-pill-orange { background: #ffedd5; color: #c2410c; }
-.inf-cat-pill-blue { background: #dbeafe; color: #1d4ed8; }
+.inf-cat-pill-green { background: #16a34a; color: #fff; }
+.inf-cat-pill-red { background: #dc2626; color: #fff; }
+.inf-cat-pill-orange { background: #ea580c; color: #fff; }
+.inf-cat-pill-blue { background: #2563eb; color: #fff; }
 .inf-motivos-dos { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; flex: 1; min-height: 0; }
 .inf-mot-col { border: 1px solid #c3d6f2; border-radius: 10px; padding: 8px 9px; background: #f8fbff; display: flex; flex-direction: column; min-height: 0; }
 .inf-mot-azul { border-color: #c3d6f2; background: linear-gradient(180deg, #f2f8ff, #fafcff); }
@@ -664,26 +612,26 @@ onMounted(cargar);
 .inf-mot-icon-azul { background: linear-gradient(135deg, #60a5fa, #2563eb); box-shadow: 0 3px 8px rgba(59,130,246,.3); }
 .inf-mot-icon-morado { background: linear-gradient(135deg, #a78bfa, #7c3aed); box-shadow: 0 3px 8px rgba(139,92,246,.3); }
 .inf-mot-col .inf-cat { flex: 1; justify-content: space-evenly; overflow-y: auto; }
-.inf-bar-purple { background: linear-gradient(90deg, #c4b5fd, #8b5cf6); }
-.inf-cat-pill-purple { background: #ede9fe; color: #6d28d9; }
-.dark .inf-cat-pill-purple { background: #2e1d4f; color: #c4b5fd; }
+.inf-bar-purple { background: linear-gradient(90deg, #a78bfa, #6d28d9); }
+.inf-cat-pill-purple { background: #7c3aed; color: #fff; }
 
 .inf-sub-grupo { display: flex; align-items: center; gap: 6px; margin: 4px 0 5px; color: #315583; font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; }
 .inf-sub-grupo:first-of-type { margin-top: 0; }
 .dark .inf-sub-grupo { color: #9db8e0; }
-.dark .inf-cat-pill-green { background: #14391f; color: #86efac; }
-.dark .inf-cat-pill-red { background: #4c1d24; color: #fda4af; }
-.dark .inf-cat-pill-orange { background: #4a2a12; color: #fdba74; }
-.dark .inf-cat-pill-blue { background: #1d3454; color: #93c5fd; }
+.dark .inf-cat-pill-green { background: #16a34a; color: #fff; }
+.dark .inf-cat-pill-red { background: #dc2626; color: #fff; }
+.dark .inf-cat-pill-orange { background: #ea580c; color: #fff; }
+.dark .inf-cat-pill-blue { background: #2563eb; color: #fff; }
+.dark .inf-cat-pill-purple { background: #7c3aed; color: #fff; }
 @media (max-width: 1400px) { .inf-cat-name { flex-basis: 92px; } }
 
 .inf-bar { display: block; height: 7px; overflow: hidden; border-radius: 99px; background: #eef2f7; }
 .inf-bar-thin { height: 6px; }
 .inf-bar > span { display: block; height: 100%; border-radius: 99px; }
-.inf-bar-red { background: linear-gradient(90deg, #f87171, #dc2626); }
-.inf-bar-orange { background: linear-gradient(90deg, #fb923c, #ea580c); }
-.inf-bar-green { background: linear-gradient(90deg, #4ade80, #16a34a); }
-.inf-bar-blue { background: linear-gradient(90deg, #93c5fd, #3b82f6); }
+.inf-bar-red { background: linear-gradient(90deg, #f87171, #b91c1c); }
+.inf-bar-orange { background: linear-gradient(90deg, #fb923c, #c2410c); }
+.inf-bar-green { background: linear-gradient(90deg, #22c55e, #15803d); }
+.inf-bar-blue { background: linear-gradient(90deg, #60a5fa, #1d4ed8); }
 .dark .inf-bar { background: #263352; }
 
 

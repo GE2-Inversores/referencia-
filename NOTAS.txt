@@ -65,4 +65,6 @@ redondo o integral
 
 
 
-
+ajustes
+1. historia clinica utf8
+2. en soportes dejar vista ajustada 
