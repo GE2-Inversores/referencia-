@@ -89,6 +89,10 @@
               <el-option label="Pendiente" value="pendiente_cama" />
               <el-option label="Nueva solicitud" value="pendiente" />
             </el-select>
+            <el-select v-model="filtroOrigen" placeholder="Todos los orígenes" clearable size="small" class="sol-select">
+              <el-option label="Correo" value="correo" />
+              <el-option label="Aplicativo" value="aplicativo" />
+            </el-select>
             <el-select v-model="sortKey" aria-label="Ordenar por" size="small">
               <el-option label="Ordenar por fecha" value="fecha" />
               <el-option label="Ordenar por paciente" value="paciente" />
@@ -582,6 +586,42 @@
                   <label class="accion-field-label">Número de ingreso (Gomedisys) <span class="accion-required">*</span></label>
                   <el-input v-model="formCambiar.numero_ingreso" placeholder="Ej: 1045821" />
                 </div>
+                <template v-if="formCambiar.estado === 'negado'">
+                  <div class="mb-1.5">
+                    <label class="accion-field-label">Grupo de negación <span class="accion-required">*</span></label>
+                    <div class="negar-grupo-btns">
+                      <button
+                        type="button"
+                        class="negar-grupo-btn"
+                        :class="{ active: formCambiar.grupo_negacion === 'no_red' }"
+                        @click="formCambiar.grupo_negacion = 'no_red'; formCambiar.motivo_negacion = ''"
+                      >
+                        <component :is="UserXIcon" class="w-4 h-4" />
+                        <span>Paciente no RED<small>Motivo libre</small></span>
+                      </button>
+                      <button
+                        type="button"
+                        class="negar-grupo-btn"
+                        :class="{ active: formCambiar.grupo_negacion === 'poblacion_objeto' }"
+                        @click="formCambiar.grupo_negacion = 'poblacion_objeto'; formCambiar.motivo_negacion = ''"
+                      >
+                        <component :is="UsersIcon" class="w-4 h-4" />
+                        <span>Población objeto<small>Lista de motivos</small></span>
+                      </button>
+                    </div>
+                  </div>
+                  <div v-if="formCambiar.grupo_negacion === 'poblacion_objeto'" class="mb-1.5">
+                    <label class="accion-field-label">Motivo de negación <span class="accion-required">*</span></label>
+                    <el-select v-model="formCambiar.motivo_negacion" placeholder="Seleccione el motivo" class="w-full" popper-class="negar-motivo-popper">
+                      <el-option v-for="m in MOTIVOS_NEGACION_POBLACION" :key="m" :label="m" :value="m" />
+                    </el-select>
+                  </div>
+                  <div v-else-if="formCambiar.grupo_negacion === 'no_red'" class="mb-1.5">
+                    <label class="accion-field-label">Motivo de negación <span class="accion-required">*</span></label>
+                    <el-input v-model="formCambiar.motivo_negacion" type="textarea" :rows="3" placeholder="Indique el motivo..." />
+                  </div>
+                  <p v-else class="negar-grupo-hint">Selecciona el grupo para habilitar el motivo de negación.</p>
+                </template>
                 <div>
                   <label class="accion-field-label">Motivo del cambio <span class="accion-required">*</span></label>
                   <el-input v-model="formCambiar.motivo" type="textarea" :rows="2" placeholder="Explique por qué cambia el estado — va en el correo a la clínica..." />
@@ -649,6 +689,8 @@ import {
   Send as SendIcon,
   Shield as ShieldIcon,
   User as UserIcon,
+  UserX as UserXIcon,
+  Users as UsersIcon,
   Building2 as BuildingIcon,
   Hourglass as HourglassIcon,
   FileDown as FileDownIcon,
@@ -714,6 +756,7 @@ interface Solicitud {
   numero_ingreso?: number;
   nombre_quien_responde?: string;
   observaciones_respuesta?: string;
+  origen?: string;
   adjuntos?: { id: number; nombre_original: string; mime_type: string; tamano: number }[];
   eventos?: { id: number; tipo: string; titulo: string; descripcion?: string; created_at: string }[];
   created_at: string;
@@ -754,6 +797,7 @@ const filtroClinica = ref<number | ''>('');
 const filtroEspecialidad = ref('');
 const filtroEps = ref('');
 const filtroEstado = ref<'' | 'completado' | 'negado' | 'cancelado' | 'en_espera' | 'pendiente' | 'pendiente_cama'>('');
+const filtroOrigen = ref<'' | 'correo' | 'aplicativo'>('');
 const seleccionadas = ref<Set<number>>(new Set());
 
 watch([itemsPorPagina, rangoFechas, filtroClinica, filtroEspecialidad, filtroEps, filtroEstado, buscarDebounced], () => {
@@ -861,12 +905,12 @@ const especialidadesUnicas = computed(() =>
 
 const hayFiltrosActivos = computed(() =>
   !!filtro.value.buscar || tabActiva.value !== 'todas' || !!rangoFechas.value ||
-  filtroClinica.value !== '' || filtroEspecialidad.value !== '' || filtroEps.value !== '' || filtroEstado.value !== ''
+  filtroClinica.value !== '' || filtroEspecialidad.value !== '' || filtroEps.value !== '' || filtroEstado.value !== '' || filtroOrigen.value !== ''
 );
 
 /** Cuántos filtros del panel están activos (el tab de estado no cuenta — ya se ve en los chips). */
 const conteoFiltros = computed(() =>
-  [filtroClinica.value !== '', filtroEspecialidad.value !== '', filtroEps.value !== '', !!rangoFechas.value, filtroEstado.value !== '']
+  [filtroClinica.value !== '', filtroEspecialidad.value !== '', filtroEps.value !== '', !!rangoFechas.value, filtroEstado.value !== '', filtroOrigen.value !== '']
     .filter(Boolean).length
 );
 
@@ -883,6 +927,7 @@ const solicitudesFiltradas = computed(() => {
     if (filtroClinica.value !== '' && s.clinica_id !== filtroClinica.value) return false;
     if (filtroEspecialidad.value !== '' && s.especialidad_requerida !== filtroEspecialidad.value) return false;
     if (filtroEps.value !== '' && s.eps !== filtroEps.value) return false;
+    if (filtroOrigen.value !== '' && (s.origen || 'aplicativo') !== filtroOrigen.value) return false;
     if (rangoFechas.value) {
       const f = s.created_at?.slice(0, 10) ?? '';
       if (f < rangoFechas.value[0] || f > rangoFechas.value[1]) return false;
@@ -1260,6 +1305,7 @@ function limpiarFiltros() {
   filtroEspecialidad.value = '';
   filtroEps.value = '';
   filtroEstado.value = '';
+  filtroOrigen.value = '';
 }
 
 /** Resalta y hace scroll hasta la solicitud referenciada por la notificación de la campana (?resaltar=ID). */
@@ -1353,7 +1399,21 @@ function cerrarDetalle() {
 const authStore = useAuthStore();
 const procesando = ref(false);
 const modalCambiar = ref(false);
-const formCambiar = ref({ fecha_respuesta: '', hora_respuesta: '', nombre_quien_responde: '', estado: '', motivo: '', sede: '', codigo_aceptacion: '', hora_llegada: '', lugar_llegada: '', numero_ingreso: '', eps: '' });
+const MOTIVOS_NEGACION_POBLACION = [
+  'No disponibilidad de especialidad',
+  'No cupo en UCI',
+  'No cupo en UCIN',
+  'Direccionamiento administrativo',
+  'No disponibilidad de cama en piso',
+  'No disponibilidad de insumo/equipo',
+  'Exclusión del PGP',
+  'No transladable',
+  'Sin respuesta por parte de intensivista',
+  'Paciente no comentado por la EPS',
+  'Soportes incompletos',
+];
+
+const formCambiar = ref({ fecha_respuesta: '', hora_respuesta: '', nombre_quien_responde: '', estado: '', motivo: '', sede: '', codigo_aceptacion: '', hora_llegada: '', lugar_llegada: '', numero_ingreso: '', eps: '', grupo_negacion: '', motivo_negacion: '' });
 
 // "Nueva solicitud" queda fuera del cambio manual — las nuevas solo
 // avanzan por el flujo normal (aceptar/negar).
@@ -1392,6 +1452,8 @@ function abrirCambiar(s: Solicitud) {
     lugar_llegada: '',
     numero_ingreso: '',
     eps: s.eps || '',
+    grupo_negacion: '',
+    motivo_negacion: '',
   };
   modalCambiar.value = true;
 }
@@ -1400,6 +1462,7 @@ async function cambiarEstado() {
   const f = formCambiar.value;
   if (!f.hora_respuesta || !f.estado || !f.motivo.trim() || !f.nombre_quien_responde.trim()
     || (['en_espera', 'pendiente_cama', 'negado'].includes(f.estado) && !f.eps)
+    || (f.estado === 'negado' && (!f.grupo_negacion || !f.motivo_negacion.trim()))
     || (f.estado === 'en_espera' && (!f.codigo_aceptacion.trim() || !f.hora_llegada || !f.lugar_llegada.trim() || !f.sede))
     || (f.estado === 'completado' && !String(f.numero_ingreso).trim())) {
     notify.warning('Complete los campos obligatorios');
@@ -2567,4 +2630,40 @@ usePolling(() => {
 .nota-item-fecha { font-size: .58rem; color: #b45309; margin-left: auto; flex-shrink: 0; }
 .nota-item-texto { font-size: .68rem; color: #78350f; margin: 0; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
 
+.negar-grupo-btns { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+.negar-grupo-btn {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  padding: .55rem .65rem;
+  border-radius: 11px;
+  border: 1.5px solid #e2e8f0;
+  background: #fff;
+  cursor: pointer;
+  transition: all .15s ease;
+  text-align: left;
+}
+.negar-grupo-btn > svg { flex-shrink: 0; color: #94a3b8; transition: color .15s ease; }
+.negar-grupo-btn > span { display: flex; flex-direction: column; gap: .05rem; font-size: .72rem; font-weight: 700; color: #334155; line-height: 1.15; }
+.negar-grupo-btn > span small { font-size: .6rem; font-weight: 500; color: #94a3b8; }
+.negar-grupo-btn:hover { border-color: #fca5a5; }
+.negar-grupo-btn:hover > svg { color: #dc2626; }
+.negar-grupo-btn.active {
+  border-color: #dc2626;
+  background: linear-gradient(135deg, #fef2f2, #fee2e2);
+  box-shadow: 0 4px 12px rgba(220,38,38,.14);
+}
+.negar-grupo-btn.active > svg { color: #dc2626; }
+.negar-grupo-btn.active > span { color: #b91c1c; }
+.negar-grupo-btn.active > span small { color: #ef8a8a; }
+.negar-grupo-hint { margin: -.1rem 0 .5rem; font-size: .64rem; color: #94a3b8; font-style: italic; }
+.dark .negar-grupo-btn { background: rgba(255,255,255,.03); border-color: rgba(255,255,255,.1); }
+.dark .negar-grupo-btn > span { color: #cbd5e1; }
+.dark .negar-grupo-btn > span small { color: #64748b; }
+.dark .negar-grupo-btn:hover { border-color: rgba(248,113,113,.5); }
+.dark .negar-grupo-btn.active { border-color: #f87171; background: rgba(220,38,38,.15); }
+.dark .negar-grupo-btn.active > svg { color: #f87171; }
+.dark .negar-grupo-btn.active > span { color: #fca5a5; }
+.dark .negar-grupo-btn.active > span small { color: #f87171; }
+.dark .negar-grupo-hint { color: #64748b; }
 </style>

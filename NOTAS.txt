@@ -68,3 +68,19 @@ redondo o integral
 ajustes
 1. historia clinica utf8
 2. en soportes dejar vista ajustada 
+
+bandeja de correo:
+1. cambiar nombre de aceptar a gestionar 
+2. marcar quien gestiono el correo cambair color del que ha sido gestionado y poder llevarlo a una bandeja 
+3. incluir adjuntos 
+4. dia de gestion de la solicitud 
+5. mejorar la vista de las solicitudes del correo y aplicativo 
+6. filtros de correo y aplicativo 
+7. poder adjuntar otro correo 
+
+
+
+estructura para subir 
+1. migraciones y correrarlas para que la BD se suba 
+cacsb@srv-1:~$ cd sites/referencia
+cacsb@srv-1:~/sites/referencia$ /opt/cpanel/ea-php83/root/usr/bin/php artisan migrate

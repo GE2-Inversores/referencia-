@@ -20,6 +20,7 @@ export interface InformeDatos {
   por_eps: FilaDesglose[];
   por_clinica: FilaDesglose[];
   por_especialidad: FilaDesglose[];
+  por_origen: FilaDesglose[];
   tiempo_respuesta: { respondidas: number; promedio_min: number | null; mediana_min: number | null };
   detalle_aceptadas: {
     total: number;
@@ -252,6 +253,7 @@ function construirBloques(d: InformeDatos): string[] {
   bloques.push(...tabla('Por EPS / aseguradora', colsDesglose, filasDesglose(d.por_eps), 16));
   bloques.push(...tabla('Por institución que refiere', colsDesglose, filasDesglose(d.por_clinica), 16));
   bloques.push(...tabla('Por especialidad', colsDesglose, filasDesglose(d.por_especialidad), 16));
+  bloques.push(...tabla('Por origen (correo vs aplicativo)', colsDesglose, filasDesglose(d.por_origen), 16));
 
   bloques.push(...tabla(
     'Casos aceptados',

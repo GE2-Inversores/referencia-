@@ -87,6 +87,7 @@ class InformeReferenciaService
             ],
             'por_clinica' => $this->desglose($solicitudes, fn (SolicitudReferencia $s): string => $s->clinica?->nombre ?? ($s->institucion_remitente ?: 'Sin institución')),
             'por_especialidad' => $this->desglose($solicitudes, fn (SolicitudReferencia $s): string => $s->especialidad_requerida ?: 'Sin especialidad'),
+            'por_origen' => $this->desglose($solicitudes, fn (SolicitudReferencia $s): string => $s->origen === 'correo' ? 'Correo' : 'Aplicativo'),
             'por_dia' => $this->porDia($solicitudes, $desde, $hasta),
             'tiempo_respuesta' => $this->tiempoRespuesta($solicitudes),
             'anterior' => $this->periodoAnterior($desde, $hasta),
@@ -156,7 +157,7 @@ class InformeReferenciaService
             ],
         ];
 
-        foreach (['Por EPS' => 'por_eps', 'Por clínica' => 'por_clinica', 'Por especialidad' => 'por_especialidad'] as $hoja => $clave) {
+        foreach (['Por EPS' => 'por_eps', 'Por clínica' => 'por_clinica', 'Por especialidad' => 'por_especialidad', 'Por origen' => 'por_origen'] as $hoja => $clave) {
             $hojas[$hoja] = [
                 ['Nombre', 'Total', 'Aceptadas', 'Negadas', 'Canceladas', 'Pendientes / nuevas', 'Tasa de aceptación (%)'],
                 ...array_map(fn (array $f): array => [$f['nombre'], $f['total'], $f['aceptadas'], $f['negadas'], $f['canceladas'], $f['pendientes'], $f['tasa_aceptacion']], $informe[$clave]),
@@ -202,8 +203,8 @@ class InformeReferenciaService
             ...$filasNegadas($informe['detalle_negadas']['por_clinica']),
         ];
 
-        $encabezadoCaso = ['ID', 'Fecha', 'Hora', 'Paciente', 'Documento', 'EPS', 'Institución', 'Especialidad', 'Diagnóstico', 'Estado', 'Grupo de negación', 'Motivo de negación', 'Motivo de no ingreso', 'Observaciones', 'Respondió', 'Hora de respuesta', 'Sede', 'Servicio de llegada', 'Código de aceptación', 'Hora de llegada'];
-        $filaCaso = fn (array $c): array => [$c['id'], $c['fecha'], $c['hora'], $c['paciente'], $c['documento'], $c['eps'], $c['institucion'], $c['especialidad'], $c['diagnostico'], $c['estado'], $c['grupo_negacion'], $c['motivo_negacion'], $c['motivo_no_ingreso'], $c['observaciones'], $c['responde'], $c['hora_respuesta'], $c['sede'], $c['servicio_llegada'], $c['codigo_aceptacion'], $c['hora_llegada']];
+        $encabezadoCaso = ['ID', 'Fecha', 'Hora', 'Paciente', 'Documento', 'Origen', 'EPS', 'Institución', 'Especialidad', 'Diagnóstico', 'Estado', 'Grupo de negación', 'Motivo de negación', 'Motivo de no ingreso', 'Observaciones', 'Respondió', 'Hora de respuesta', 'Sede', 'Servicio de llegada', 'Código de aceptación', 'Hora de llegada'];
+        $filaCaso = fn (array $c): array => [$c['id'], $c['fecha'], $c['hora'], $c['paciente'], $c['documento'], $c['origen'], $c['eps'], $c['institucion'], $c['especialidad'], $c['diagnostico'], $c['estado'], $c['grupo_negacion'], $c['motivo_negacion'], $c['motivo_no_ingreso'], $c['observaciones'], $c['responde'], $c['hora_respuesta'], $c['sede'], $c['servicio_llegada'], $c['codigo_aceptacion'], $c['hora_llegada']];
 
         $hojas['Ingresos efectivos'] = [
             ['ID', 'Fecha', 'Paciente', 'Documento', 'EPS', 'Institución', 'Especialidad', 'Sede', 'Servicio de llegada', 'Código de aceptación', 'Número de ingreso'],
@@ -553,6 +554,7 @@ class InformeReferenciaService
             'hora' => substr((string) $s->hora, 0, 5),
             'paciente' => trim(preg_replace('/\s+/', ' ', "{$s->primer_nombre} {$s->segundo_nombre} {$s->primer_apellido} {$s->segundo_apellido}")),
             'documento' => trim("{$s->tipo_documento} {$s->numero_documento}"),
+            'origen' => $s->origen === 'correo' ? 'Correo' : 'Aplicativo',
             'eps' => $s->eps,
             'institucion' => $s->clinica?->nombre ?? $s->institucion_remitente,
             'especialidad' => $s->especialidad_requerida,

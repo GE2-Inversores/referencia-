@@ -19,6 +19,8 @@ class SolicitudReferencia extends Model
 
     protected $fillable = [
         'clinica_id',
+        'inbox_mensaje_id',
+        'origen',
         'fecha',
         'hora',
         'primer_nombre',

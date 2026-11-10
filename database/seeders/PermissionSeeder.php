@@ -37,6 +37,7 @@ class PermissionSeeder extends Seeder
             ['historico.view', 'Ver historial de solicitudes', 'Permite consultar el historial de solicitudes finalizadas'],
             ['solicitudes.analytics', 'Ver analíticas de solicitudes', 'Permite ver los paneles de métricas de la cola de solicitudes (salud de la cola, especialidades)'],
             ['dashboard.view', 'Ver panel principal', 'Permite acceder al dashboard con todas las métricas y gráficos'],
+            ['inbox.view', 'Ver bandeja de correo', 'Permite acceder a la bandeja de entrada con los correos del buzón de Gmail'],
         ])->each(fn (array $permission) => Permission::query()->updateOrCreate(
             [
                 'name' => $permission[0],

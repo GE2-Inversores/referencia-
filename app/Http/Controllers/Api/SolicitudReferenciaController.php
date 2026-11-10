@@ -331,6 +331,8 @@ class SolicitudReferenciaController extends Controller
             // (espera/cupo) o al negarla; al completar se conserva la que hay.
             'eps' => ['nullable', Rule::requiredIf(fn () => in_array($request->input('estado'), ['en_espera', 'pendiente_cama', 'negado'], true)), 'string', 'max:120'],
             'numero_ingreso' => ['nullable', Rule::requiredIf(fn () => $request->input('estado') === 'completado'), 'integer'],
+            'grupo_negacion' => ['nullable', Rule::requiredIf(fn () => $request->input('estado') === 'negado'), Rule::in(['no_red', 'poblacion_objeto'])],
+            'motivo_negacion' => ['nullable', Rule::requiredIf(fn () => $request->input('estado') === 'negado'), 'string', 'max:250'],
             'correo_extra' => ['nullable', 'email', 'max:150'],
             'correos_extra' => ['nullable', 'array', 'max:10'],
             'correos_extra.*' => ['email', 'max:150'],
@@ -349,8 +351,8 @@ class SolicitudReferenciaController extends Controller
             'sede' => $validated['estado'] === 'en_espera' ? ($validated['sede'] ?? $solicitud->sede) : $solicitud->sede,
             'eps' => $validated['eps'] ?? $solicitud->eps,
             'numero_ingreso' => $validated['estado'] === 'completado' ? $validated['numero_ingreso'] : $solicitud->numero_ingreso,
-            'motivo_negacion' => $validated['estado'] === 'negado' ? $validated['motivo'] : $solicitud->motivo_negacion,
-            'grupo_negacion' => $validated['estado'] === 'negado' && ! $solicitud->grupo_negacion ? 'no_red' : $solicitud->grupo_negacion,
+            'motivo_negacion' => $validated['estado'] === 'negado' ? ($validated['motivo_negacion'] ?? $validated['motivo']) : $solicitud->motivo_negacion,
+            'grupo_negacion' => $validated['estado'] === 'negado' ? ($validated['grupo_negacion'] ?? $solicitud->grupo_negacion ?? 'no_red') : $solicitud->grupo_negacion,
         ]);
 
         $solicitud->load('clinica');

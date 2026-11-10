@@ -174,6 +174,44 @@
       </el-alert>
     </template>
 
+    <!-- Bandeja de correo (Gmail) -->
+    <div class="border-t border-gray-100 pt-4">
+      <h4 class="text-sm font-semibold text-gray-800 mb-1.5">Bandeja de correo (Gmail)</h4>
+      <p class="text-xs text-gray-400 mb-4">Los correos que lleguen a este buzón se muestran en el módulo <strong>Bandeja</strong>. Según el tipo de cuenta se conecta por contraseña de aplicación (Gmail personal) o por cuenta de servicio (Google Workspace con dominio propio).</p>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">Buzón de Gmail</label>
+          <el-input v-model="form.gmail_buzon" type="email" placeholder="referencia@tudominio.co" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">Método de conexión</label>
+          <el-select v-model="form.gmail_modo" class="w-full">
+            <el-option label="Contraseña de aplicación (Gmail personal)" value="imap" />
+            <el-option label="Cuenta de servicio (Google Workspace)" value="servicio" />
+          </el-select>
+        </div>
+        <template v-if="form.gmail_modo === 'imap'">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1.5">Contraseña de aplicación</label>
+            <el-input v-model="form.gmail_password" type="password" show-password placeholder="xxxx xxxx xxxx xxxx" />
+            <p class="text-xs text-gray-400 mt-1">Se genera en myaccount.google.com/apppasswords (requiere verificación en dos pasos activa). No es la contraseña normal del correo.</p>
+          </div>
+        </template>
+        <template v-else>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1.5">Credenciales de la cuenta de servicio (JSON)</label>
+            <el-input
+              v-model="form.gmail_credenciales"
+              type="textarea"
+              :rows="4"
+              placeholder='{"type":"service_account","project_id":"...","private_key":"...","client_email":"..."}'
+            />
+            <p class="text-xs text-gray-400 mt-1">Pega aquí el contenido completo del archivo JSON que descargaste de Google Cloud. Requiere delegación de dominio autorizada en Workspace Admin.</p>
+          </div>
+        </template>
+      </div>
+    </div>
+
     <!-- Probar envío -->
     <div class="border-t border-gray-100 pt-4">
       <h4 class="text-sm font-semibold text-gray-800 mb-1.5">Probar envío de correo</h4>
@@ -260,6 +298,10 @@ const form = reactive({
   mailgun_endpoint: 'api.mailgun.net',
   postmark_token: '',
   resend_key: '',
+  gmail_buzon: '',
+  gmail_modo: 'imap',
+  gmail_password: '',
+  gmail_credenciales: '',
 });
 
 function loadForm() {
@@ -281,6 +323,10 @@ function loadForm() {
   form.mailgun_endpoint = settingsStore.getSettingValue('mail', 'mailgun_endpoint', 'api.mailgun.net');
   form.postmark_token = settingsStore.getSettingValue('mail', 'postmark_token', '');
   form.resend_key = settingsStore.getSettingValue('mail', 'resend_key', '');
+  form.gmail_buzon = settingsStore.getSettingValue('mail', 'gmail_buzon', '');
+  form.gmail_modo = settingsStore.getSettingValue('mail', 'gmail_modo', 'imap');
+  form.gmail_password = settingsStore.getSettingValue('mail', 'gmail_password', '');
+  form.gmail_credenciales = settingsStore.getSettingValue('mail', 'gmail_credenciales', '');
 }
 
 loadForm();

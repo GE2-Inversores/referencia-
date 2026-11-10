@@ -100,25 +100,39 @@
           </header>
           <ul class="inf-indicators">
             <li>
+              <span class="inf-ind-icon inf-ind-blue"><component :is="ClipboardIcon" class="w-3.5 h-3.5" /></span>
+              <span class="inf-ind-label">Pendiente por decidir</span>
+              <span class="inf-ind-pill inf-ind-blue">{{ informe.resumen.nuevas }}</span>
+            </li>
+            <li>
+              <span class="inf-ind-icon inf-ind-orange"><component :is="HourglassIcon" class="w-3.5 h-3.5" /></span>
+              <span class="inf-ind-label">Pendiente por cupo</span>
+              <span class="inf-ind-pill inf-ind-orange">{{ informe.resumen.pendientes_cupo }}</span>
+            </li>
+            <li>
+              <span class="inf-ind-icon inf-ind-teal"><component :is="CheckIcon" class="w-3.5 h-3.5" /></span>
+              <span class="inf-ind-label">Aceptadas por llegar</span>
+              <span class="inf-ind-pill inf-ind-teal">{{ informe.resumen.aceptado }}</span>
+            </li>
+            <li>
               <span class="inf-ind-icon inf-ind-green"><component :is="BedIcon" class="w-3.5 h-3.5" /></span>
               <span class="inf-ind-label">Ingresos efectivos</span>
               <span class="inf-ind-pill inf-ind-green">{{ informe.resumen.ingresos_efectivos }}</span>
             </li>
-            
             <li>
-              <span class="inf-ind-icon inf-ind-red"><component :is="UserXIcon" class="w-3.5 h-3.5" /></span>
+              <span class="inf-ind-icon inf-ind-rose"><component :is="UserXIcon" class="w-3.5 h-3.5" /></span>
               <span class="inf-ind-label">No ingresaron</span>
-              <span class="inf-ind-pill inf-ind-red">{{ informe.resumen.negadas_no_ingreso }}</span>
-            </li>
-            <li>
-              <span class="inf-ind-icon inf-ind-green"><component :is="CheckIcon" class="w-3.5 h-3.5" /></span>
-              <span class="inf-ind-label">Aceptadas</span>
-              <span class="inf-ind-pill inf-ind-green">{{ informe.resumen.aceptadas }}</span>
+              <span class="inf-ind-pill inf-ind-rose">{{ informe.resumen.negadas_no_ingreso }}</span>
             </li>
             <li>
               <span class="inf-ind-icon inf-ind-red"><component :is="XIcon" class="w-3.5 h-3.5" /></span>
-              <span class="inf-ind-label">Negadas</span>
-              <span class="inf-ind-pill inf-ind-red">{{ informe.resumen.negadas }}</span>
+              <span class="inf-ind-label">Negadas por decisión</span>
+              <span class="inf-ind-pill inf-ind-red">{{ informe.resumen.negadas_decision }}</span>
+            </li>
+            <li>
+              <span class="inf-ind-icon inf-ind-gray"><component :is="BanIcon" class="w-3.5 h-3.5" /></span>
+              <span class="inf-ind-label">Canceladas</span>
+              <span class="inf-ind-pill inf-ind-gray">{{ informe.resumen.canceladas }}</span>
             </li>
           </ul>
         </section>
@@ -202,6 +216,7 @@ import {
   Building2 as BuildingIcon,
   Hourglass as HourglassIcon,
   MapPin as MapPinIcon,
+  Mail as MailIcon,
   Stethoscope as StethoscopeIcon,
   Users as UsersIcon,
   BedDouble as BedIcon,
@@ -346,6 +361,12 @@ const cuatroColumnas = computed(() => informe.value
         tema: 'inf-t-blue',
         icono: BuildingIcon, iconoClase: 'inf-icon-blue', barClass: 'inf-bar-blue', pillClass: 'inf-cat-pill-blue',
         filas: informe.value.por_clinica.map((f) => ({ nombre: f.nombre, total: f.total, pct: pctDe(f.total, informe.value!.resumen.total) })),
+      },
+      {
+        titulo: 'Origen de la solicitud',
+        tema: 'inf-t-blue',
+        icono: MailIcon, iconoClase: 'inf-icon-blue', barClass: 'inf-bar-blue', pillClass: 'inf-cat-pill-blue',
+        filas: (informe.value.por_origen ?? []).map((f) => ({ nombre: f.nombre, total: f.total, pct: pctDe(f.total, informe.value!.resumen.total) })),
       },
     ]
   : []);
@@ -572,12 +593,20 @@ onMounted(cargar);
 .inf-ind-pill { min-width: 32px; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; text-align: center; }
 .inf-ind-green { background: #16a34a; color: #fff; }
 .inf-ind-red { background: #dc2626; color: #fff; }
+.inf-ind-rose { background: #e11d48; color: #fff; }
 .inf-ind-orange { background: #ea580c; color: #fff; }
+.inf-ind-blue { background: #2563eb; color: #fff; }
+.inf-ind-teal { background: #0d9488; color: #fff; }
+.inf-ind-gray { background: #64748b; color: #fff; }
 .dark .inf-indicators li { border-color: #263352; background: #1a2233; }
 .dark .inf-ind-label { color: #cbd5e1; }
 .dark .inf-ind-green { background: #16a34a; color: #fff; }
 .dark .inf-ind-red { background: #dc2626; color: #fff; }
+.dark .inf-ind-rose { background: #e11d48; color: #fff; }
 .dark .inf-ind-orange { background: #ea580c; color: #fff; }
+.dark .inf-ind-blue { background: #2563eb; color: #fff; }
+.dark .inf-ind-teal { background: #0d9488; color: #fff; }
+.dark .inf-ind-gray { background: #64748b; color: #fff; }
 
 /* ── Listas de categorías (4 desgloses) ── */
 .inf-cat { display: flex; flex-direction: column; gap: 5px; margin: 0; padding: 0 2px 0 0; list-style: none; max-height: 176px; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-color: transparent transparent; }

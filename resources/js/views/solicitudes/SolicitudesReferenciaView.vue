@@ -81,6 +81,10 @@
               <el-select v-model="filtroEps" placeholder="Todas las aseguradoras" clearable filterable size="small" class="sol-select">
                 <el-option v-for="e in EPS_LIST" :key="e" :label="e" :value="e" />
               </el-select>
+              <el-select v-model="filtroOrigen" placeholder="Todos los orígenes" clearable size="small" class="sol-select">
+                <el-option label="Correo" value="correo" />
+                <el-option label="Aplicativo" value="aplicativo" />
+              </el-select>
               <el-select
                 :model-value="tabActiva"
                 placeholder="Todos los estados"
@@ -172,6 +176,9 @@
                   <div class="sol-reference-patient">
                     <div class="sol-reference-avatar" :style="avatarStyle(s)">
                       {{ inicialesPaciente(s) }}
+                      <span v-if="s.inbox_mensaje_id" class="sol-correo-badge" title="Registrada desde un correo de la Bandeja">
+                        <component :is="MailIcon" />
+                      </span>
                     </div>
                     <div class="sol-reference-identity">
                       <button type="button" class="sol-reference-name" :title="nombreCompleto(s)" @click="verDetalle(s)">{{ nombreCompleto(s) }}</button>
@@ -201,6 +208,13 @@
                     <p v-else class="sol-reference-diagnosis" :title="s.diagnostico">{{ s.diagnostico || '—' }}</p>
                   </div>
                   <div class="sol-reference-state sol-reference-divider">
+                    <div class="sol-origen" :class="s.inbox_mensaje_id ? 'sol-origen--correo' : 'sol-origen--app'" :title="s.inbox_mensaje_id ? 'Registrada desde un correo de la Bandeja' : 'Registrada desde el portal de clínicas'">
+                      <span class="sol-reference-label">Origen</span>
+                      <span class="sol-origen-val">
+                        <component :is="s.inbox_mensaje_id ? MailIcon : MonitorSmartphoneIcon" />
+                        {{ s.inbox_mensaje_id ? 'Correo electrónico' : 'Aplicativo' }}
+                      </span>
+                    </div>
                     <span v-if="s.urgencia_vital" class="sol-reference-status sol-reference-vital">
                       <span class="sol-status-dot"></span>Urgencia vital
                     </span>
@@ -1090,6 +1104,42 @@
                   <label class="accion-field-label">Número de ingreso (Gomedisys) <span class="accion-required">*</span></label>
                   <el-input v-model="formCambiar.numero_ingreso" placeholder="Ej: 1045821" />
                 </div>
+                <template v-if="formCambiar.estado === 'negado'">
+                  <div class="mb-1.5">
+                    <label class="accion-field-label">Grupo de negación <span class="accion-required">*</span></label>
+                    <div class="negar-grupo-btns">
+                      <button
+                        type="button"
+                        class="negar-grupo-btn"
+                        :class="{ active: formCambiar.grupo_negacion === 'no_red' }"
+                        @click="formCambiar.grupo_negacion = 'no_red'; formCambiar.motivo_negacion = ''"
+                      >
+                        <component :is="UserXIcon" class="w-4 h-4" />
+                        <span>Paciente no RED<small>Motivo libre</small></span>
+                      </button>
+                      <button
+                        type="button"
+                        class="negar-grupo-btn"
+                        :class="{ active: formCambiar.grupo_negacion === 'poblacion_objeto' }"
+                        @click="formCambiar.grupo_negacion = 'poblacion_objeto'; formCambiar.motivo_negacion = ''"
+                      >
+                        <component :is="UsersIcon" class="w-4 h-4" />
+                        <span>Población objeto<small>Lista de motivos</small></span>
+                      </button>
+                    </div>
+                  </div>
+                  <div v-if="formCambiar.grupo_negacion === 'poblacion_objeto'" class="mb-1.5">
+                    <label class="accion-field-label">Motivo de negación <span class="accion-required">*</span></label>
+                    <el-select v-model="formCambiar.motivo_negacion" placeholder="Seleccione el motivo" class="w-full" popper-class="negar-motivo-popper">
+                      <el-option v-for="m in MOTIVOS_NEGACION_POBLACION" :key="m" :label="m" :value="m" />
+                    </el-select>
+                  </div>
+                  <div v-else-if="formCambiar.grupo_negacion === 'no_red'" class="mb-1.5">
+                    <label class="accion-field-label">Motivo de negación <span class="accion-required">*</span></label>
+                    <el-input v-model="formCambiar.motivo_negacion" type="textarea" :rows="3" placeholder="Indique el motivo..." />
+                  </div>
+                  <p v-else class="negar-grupo-hint">Selecciona el grupo para habilitar el motivo de negación.</p>
+                </template>
                 <div>
                   <label class="accion-field-label">Motivo del cambio <span class="accion-required">*</span></label>
                   <el-input v-model="formCambiar.motivo" type="textarea" :rows="2" placeholder="Explique por qué cambia el estado — va en el correo a la clínica..." />
@@ -1386,6 +1436,8 @@ import {
   Activity as ActivityIcon,
   UserX as UserXIcon,
   Users as UsersIcon,
+  Mail as MailIcon,
+  MonitorSmartphone as MonitorSmartphoneIcon,
   StickyNote as StickyNoteIcon,
 } from '@lucide/vue';
 import http from '@/plugins/axios';
@@ -1449,6 +1501,8 @@ interface Solicitud {
   hora_respuesta?: string;
   hora_llegada?: string;
   lugar_llegada?: string;
+  inbox_mensaje_id?: number | null;
+  inbox_mensaje_id?: number | null;
   sede?: string;
   motivo_negacion?: string;
   grupo_negacion?: string;
@@ -1508,6 +1562,7 @@ onClickOutside(filtrosWrap, (e) => {
 const filtroClinica = ref<number | string | ''>('');
 const filtroEspecialidad = ref('');
 const filtroEps = ref('');
+const filtroOrigen = ref<'' | 'correo' | 'aplicativo'>('');
 const rangoFechas = ref<[string, string] | null>(null);
 
 // Datos del panel lateral (dona, barras por día, top clínicas) y de los chips
@@ -1547,7 +1602,7 @@ const adjuntoActivo = ref<{ id: number; nombre_original: string; mime_type: stri
 const formAceptar = ref<{ [k: string]: string | boolean | string[] }>({ fecha_respuesta: '', hora_respuesta: '', nombre_quien_responde: '', sin_disponibilidad: false, sede: '', eps: '', codigo_aceptacion: '', hora_llegada: '', lugar_llegada: '', observaciones_respuesta: '', correos_extra: [] });
 const formNegar = ref<{ [k: string]: string | string[] }>({ fecha_respuesta: '', hora_respuesta: '', grupo_negacion: '', motivo_negacion: '', eps: '', nombre_quien_responde: '', observaciones_respuesta: '', correos_extra: [] });
 const modalCambiar = ref(false);
-const formCambiar = ref<{ [k: string]: string | string[] }>({ fecha_respuesta: '', hora_respuesta: '', nombre_quien_responde: '', estado: '', motivo: '', sede: '', codigo_aceptacion: '', hora_llegada: '', lugar_llegada: '', numero_ingreso: '', eps: '', correos_extra: [] });
+const formCambiar = ref<{ [k: string]: string | string[] }>({ fecha_respuesta: '', hora_respuesta: '', nombre_quien_responde: '', estado: '', motivo: '', sede: '', codigo_aceptacion: '', hora_llegada: '', lugar_llegada: '', numero_ingreso: '', eps: '', correos_extra: [], grupo_negacion: '', motivo_negacion: '' });
 
 // Destinos posibles del cambio manual — "Nueva solicitud" queda excluida:
 // las nuevas solo avanzan por el flujo normal (aceptar/negar). Tampoco se
@@ -1767,11 +1822,11 @@ const topEspecialidadesCola = computed(() => {
 const hayFiltros = computed(() =>
   !!filtro.value.buscar || tabActiva.value !== 'todas'
   || filtroClinica.value !== '' || !!filtroEspecialidad.value || !!filtroEps.value || !!rangoFechas.value
-  || !!edadCola.value
+  || !!filtroOrigen.value || !!edadCola.value
 );
 /** Cuántos filtros del panel están activos (el tab de estado no cuenta — ya se ve en los chips). */
 const conteoFiltros = computed(() =>
-  [filtroClinica.value !== '', !!filtroEspecialidad.value, !!filtroEps.value, !!rangoFechas.value, !!filtro.value.buscar]
+  [filtroClinica.value !== '', !!filtroEspecialidad.value, !!filtroEps.value, !!rangoFechas.value, !!filtro.value.buscar, !!filtroOrigen.value]
     .filter(Boolean).length
 );
 
@@ -1829,6 +1884,7 @@ const solicitudesFiltradas = computed(() => {
     }
     if (filtroEspecialidad.value && s.especialidad_requerida !== filtroEspecialidad.value) return false;
     if (filtroEps.value && s.eps !== filtroEps.value) return false;
+    if (filtroOrigen.value && (s.inbox_mensaje_id ? 'correo' : 'aplicativo') !== filtroOrigen.value) return false;
     if (rangoFechas.value) {
       const dia = (s.fecha ?? s.created_at)?.slice(0, 10);
       if (dia && (dia < rangoFechas.value[0] || dia > rangoFechas.value[1])) return false;
@@ -2167,6 +2223,7 @@ function limpiarFiltros() {
   filtroClinica.value = '';
   filtroEspecialidad.value = '';
   filtroEps.value = '';
+  filtroOrigen.value = '';
   rangoFechas.value = null;
   edadCola.value = null;
 }
@@ -2599,6 +2656,8 @@ function abrirCambiar(s: Solicitud) {
     numero_ingreso: '',
     eps: s.eps || '',
     correos_extra: [],
+    grupo_negacion: '',
+    motivo_negacion: '',
   };
   modalCambiar.value = true;
 }
@@ -2607,6 +2666,7 @@ async function cambiarEstado() {
   const f = formCambiar.value;
   if (!f.hora_respuesta || !f.estado || !f.motivo.trim() || !f.nombre_quien_responde.trim()
     || (['en_espera', 'pendiente_cama', 'negado'].includes(f.estado) && !f.eps)
+    || (f.estado === 'negado' && (!f.grupo_negacion || !f.motivo_negacion.trim()))
     || (f.estado === 'en_espera' && (!f.codigo_aceptacion.trim() || !f.hora_llegada || !f.lugar_llegada.trim() || !f.sede))
     || (f.estado === 'completado' && !String(f.numero_ingreso).trim())) {
     notify.warning('Complete los campos obligatorios');
@@ -3549,7 +3609,7 @@ usePolling(() => {
 .sol-body { flex: 0 1 auto; }
 .sol-list-panel { display: flex; flex-direction: column; container-type: inline-size; }
 .sol-reference-scroll { flex: 0 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 2px 3px 3px 1px; }
-.sol-reference-list { display: flex; flex-direction: column; gap: 8px; }
+.sol-reference-list { display: flex; flex-direction: column; gap: 10px; }
 .sol-reference-card {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, .8fr) minmax(0, 1.2fr) minmax(185px, .67fr) 100px;
@@ -3557,14 +3617,14 @@ usePolling(() => {
   align-items: center;
   gap: 14px;
   min-height: 86px;
-  padding: 9px 10px;
+  padding: 11px 14px;
   border: 1px solid rgba(225,235,248,.7);
-  border-radius: 9px;
+  border-radius: 14px;
   background: linear-gradient(115deg, #fff, #fbfdff);
-  box-shadow: 0 3px 10px rgba(42,88,149,.045);
-  transition: border-color .18s ease, box-shadow .18s ease;
+  box-shadow: 0 2px 8px rgba(42,88,149,.06);
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
 }
-.sol-reference-card:hover { border-color: #bfd4f5; box-shadow: 0 4px 14px rgba(42,88,149,.1); }
+.sol-reference-card:hover { border-color: #a9c8f7; box-shadow: 0 8px 22px rgba(42,88,149,.14); transform: translateY(-1px); }
 .sol-reference-card > div { min-width: 0; }
 .sol-reference-urgent {
   border-color: #f43f5e;
@@ -3576,17 +3636,22 @@ usePolling(() => {
   50% { box-shadow: inset 4px 0 0 #be123c, 0 0 0 6px rgba(225, 29, 72, 0); }
 }
 .sol-reference-urgent:hover { border-color: #e11d48; }
-.sol-reference-card--pendiente { border-color: #f5dda6; background: linear-gradient(110deg, #fff6e3, #fffbef); box-shadow: inset 3px 0 0 #f59e0b; }
-.sol-reference-card--pendiente:hover { border-color: #eec878; box-shadow: inset 3px 0 0 #d97706, 0 4px 14px rgba(217,119,6,.1); }
-.sol-reference-card--pendiente_cama { border-color: #f7cd9e; background: linear-gradient(110deg, #fff0dd, #fff8ec); box-shadow: inset 3px 0 0 #f97316; }
-.sol-reference-card--pendiente_cama:hover { border-color: #f0ab63; box-shadow: inset 3px 0 0 #ea580c, 0 4px 14px rgba(234,88,12,.1); }
-.sol-reference-card--en_espera { border-color: #b5d3fb; background: linear-gradient(110deg, #e8f2ff, #f3f9ff); box-shadow: inset 3px 0 0 #3b82f6; }
-.sol-reference-card--en_espera:hover { border-color: #8bb8f5; box-shadow: inset 3px 0 0 #2563eb, 0 4px 14px rgba(37,99,235,.12); }
-.sol-reference-card--completado { border-color: #b8e6c8; background: linear-gradient(110deg, #edf9f0, #f7fcf8); box-shadow: inset 3px 0 0 #22c55e; }
-.sol-reference-card--negado { border-color: #f3b4bc; background: linear-gradient(110deg, #fff0f2, #fff7f8); box-shadow: inset 3px 0 0 #ef4444; }
+.sol-reference-card--pendiente { border-color: #f2cf7d; background: linear-gradient(110deg, #fff4d8 0%, #fffaeb 60%, #fffdf5 100%); box-shadow: inset 4px 0 0 #f59e0b; }
+.sol-reference-card--pendiente:hover { border-color: #eab308; box-shadow: inset 4px 0 0 #d97706, 0 8px 20px rgba(217,119,6,.16); }
+.sol-reference-card--pendiente_cama { border-color: #f5bd82; background: linear-gradient(110deg, #ffecd6 0%, #fff6ea 60%, #fffcf5 100%); box-shadow: inset 4px 0 0 #f97316; }
+.sol-reference-card--pendiente_cama:hover { border-color: #f09b4a; box-shadow: inset 4px 0 0 #ea580c, 0 8px 20px rgba(234,88,12,.16); }
+.sol-reference-card--en_espera { border-color: #9ec9f9; background: linear-gradient(110deg, #dcecfe 0%, #f0f8ff 60%, #f8fcff 100%); box-shadow: inset 4px 0 0 #3b82f6; }
+.sol-reference-card--en_espera:hover { border-color: #60a5fa; box-shadow: inset 4px 0 0 #2563eb, 0 8px 20px rgba(37,99,235,.16); }
+.sol-reference-card--completado { border-color: #a4dcb4; background: linear-gradient(110deg, #e2f7e9 0%, #f2fcf5 60%, #f9fdfb 100%); box-shadow: inset 4px 0 0 #22c55e; }
+.sol-reference-card--negado { border-color: #f0a3ad; background: linear-gradient(110deg, #ffe4ea 0%, #fff3f5 60%, #fffbfc 100%); box-shadow: inset 4px 0 0 #ef4444; }
 .sol-reference-highlighted { outline: 2px solid #60a5fa; outline-offset: -2px; }
 .sol-reference-patient { grid-area: patient; display: flex; align-items: flex-start; gap: 10px; }
-.sol-reference-avatar { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0; font-size: 13px; font-weight: 750; }
+.sol-reference-avatar {
+  display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0;
+  font-size: 13px; font-weight: 750;
+  box-shadow: 0 0 0 2px #fff, 0 4px 10px rgba(20,40,80,.16);
+  text-shadow: 0 1px 1px rgba(255,255,255,.35);
+}
 .sol-reference-identity { min-width: 0; flex: 1; }
 .sol-reference-name { display: block; max-width: 100%; padding: 0; border: 0; background: none; color: #102451; font: inherit; font-size: 14px; font-weight: 750; cursor: pointer; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sol-reference-name:hover { color: #2563eb; }
@@ -3595,23 +3660,48 @@ usePolling(() => {
 .sol-reference-insurer { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .sol-reference-insurer-label { display: inline-flex; align-items: center; gap: 4px; color: #486996; font-size: 9px; flex-shrink: 0; }
 .sol-reference-insurer-label svg { width: 12px; height: 12px; color: #1d4ed8; }
-.sol-reference-insurer-chip { padding: 3px 8px; border-radius: 999px; background: #e9f2ff; color: #1e4688; font-size: 9.5px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sol-reference-insurer-chip { padding: 3px 8px; border: 1px solid #cfe2ff; border-radius: 999px; background: #e9f2ff; color: #1e4688; font-size: 9.5px; font-weight: 600; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sol-reference-clinic { grid-area: clinic; }
 .sol-reference-clinical { grid-area: clinical; }
 .sol-reference-state { grid-area: state; }
 .sol-reference-divider { padding-left: 17px; border-left: 1px solid #dfe8f7; }
-.sol-reference-label { display: block; color: #6c87b0; font-size: 8.5px; font-weight: 600; text-transform: uppercase; line-height: 1.3; }
+.sol-reference-label { display: block; color: #6c87b0; font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; line-height: 1.3; }
 .sol-reference-clinic-name { margin: 3px 0; color: #18345e; font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sol-reference-contact { margin: 0; color: #728bb3; font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sol-reference-specialty { margin: 3px 0 0; color: #075ce8; font-size: 13px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sol-reference-diagnosis-label { margin-top: 5px; }
 .sol-reference-diagnosis { margin: 2px 0 0; color: #34517a; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sol-reference-status { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 4px 8px; border-radius: 999px; font-size: 11px; line-height: 1.15; white-space: nowrap; }
+.sol-reference-status { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 4px 8px; border: 1px solid transparent; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1.15; white-space: nowrap; }
 .sol-reference-status .sol-status-dot { background: currentColor; flex-shrink: 0; }
-.sol-reference-status--pendiente { background: #fff3cc; color: #c17b00; }
-.sol-reference-status--pendiente_cama { background: #ffecd9; color: #e45a00; }
-.sol-reference-status--en_espera { background: #e1edff; color: #0960e8; }
-.sol-reference-status--completado { background: #dcfce7; color: #15803d; }
+.sol-reference-status--pendiente { background: #fff3cc; color: #b45309; border-color: #fde68a; }
+.sol-reference-status--pendiente_cama { background: #ffecd9; color: #e45a00; border-color: #fed7aa; }
+.sol-reference-status--en_espera { background: #e1edff; color: #0960e8; border-color: #bfdbfe; }
+.sol-reference-status--completado { background: #dcfce7; color: #15803d; border-color: #bbf7d0; }
+/* Origen de la solicitud: se muestra como un dato más dentro de la
+   tarjeta (Correo electrónico vs Aplicativo) — visible pero sin píldora. */
+.sol-reference-avatar { position: relative; }
+.sol-correo-badge {
+  position: absolute; right: -4px; bottom: -4px;
+  display: grid; place-items: center;
+  width: 18px; height: 18px; border-radius: 50%;
+  color: #fff;
+  background: linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%);
+  box-shadow: 0 0 0 2px #fff, 0 2px 5px rgba(37, 99, 235, .45);
+}
+.sol-correo-badge svg { width: 9px; height: 9px; }
+.dark .sol-correo-badge { box-shadow: 0 0 0 2px #161b28, 0 2px 5px rgba(0,0,0,.5); }
+.sol-origen { display: flex; flex-direction: column; gap: 2px; margin-bottom: 2px; }
+.sol-origen-val {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+  font-size: 12.5px; font-weight: 800; letter-spacing: .01em;
+  line-height: 1.2; white-space: nowrap;
+  border-left: 3px solid; padding-left: 7px;
+}
+.sol-origen-val svg { width: 14px; height: 14px; flex-shrink: 0; }
+.sol-origen--correo .sol-origen-val { color: #0369a1; border-color: #38bdf8; }
+.sol-origen--app .sol-origen-val { color: #4f46e5; border-color: #a5b4fc; }
+.dark .sol-origen--correo .sol-origen-val { color: #7dd3fc; border-color: #0ea5e9; }
+.dark .sol-origen--app .sol-origen-val { color: #a5b4fc; border-color: #6366f1; }
 .sol-reference-status--negado { background: #ffe0e7; color: #df123d; font-weight: 650; }
 .sol-reference-vital {
   background: linear-gradient(135deg, #ef4444, #dc2626);
@@ -3635,14 +3725,15 @@ usePolling(() => {
 .dark .sol-list-tools button { border-color: #314666; background: #1c2d46; color: #bcd1ef; }
 .dark .sol-list-tools button:hover:not(:disabled) { background: #263d5d; }
 .dark .sol-reference-card { background: linear-gradient(115deg, #192439, #162133); border-color: #293b56; box-shadow: 0 3px 10px rgba(0,0,0,.12); }
-.dark .sol-reference-card:hover { border-color: #4771ab; }
+.dark .sol-reference-card:hover { border-color: #4771ab; transform: translateY(-1px); box-shadow: 0 8px 22px rgba(0,0,0,.3); }
+.dark .sol-reference-avatar { box-shadow: 0 0 0 2px #161b28, 0 4px 10px rgba(0,0,0,.45); text-shadow: none; }
 .dark .sol-reference-urgent { border-color: #e11d48; background: linear-gradient(110deg, #4a1f2e, #331c29); animation: sol-vital-card-glow 1.8s ease-in-out infinite; }
 .dark .sol-reference-vital { background: linear-gradient(135deg, #e11d48, #be123c); color: #fff; border-color: #f43f5e; }
-.dark .sol-reference-card--pendiente { border-color: #6b5526; background: linear-gradient(110deg, #33290f, #28220f); box-shadow: inset 3px 0 0 #d9a028; }
-.dark .sol-reference-card--pendiente_cama { border-color: #7a4d21; background: linear-gradient(110deg, #35240f, #2a1f10); box-shadow: inset 3px 0 0 #f07d22; }
-.dark .sol-reference-card--en_espera { border-color: #2e5a9c; background: linear-gradient(110deg, #16263f, #182135); box-shadow: inset 3px 0 0 #4d8ef7; }
-.dark .sol-reference-card--completado { border-color: #2f6b44; background: linear-gradient(110deg, #14291c, #16241b); box-shadow: inset 3px 0 0 #34c468; }
-.dark .sol-reference-card--negado { border-color: #7c3a44; background: linear-gradient(110deg, #331e24, #2a1d22); box-shadow: inset 3px 0 0 #f05656; }
+.dark .sol-reference-card--pendiente { border-color: #6b5526; background: linear-gradient(110deg, #33290f, #28220f); box-shadow: inset 4px 0 0 #d9a028; }
+.dark .sol-reference-card--pendiente_cama { border-color: #7a4d21; background: linear-gradient(110deg, #35240f, #2a1f10); box-shadow: inset 4px 0 0 #f07d22; }
+.dark .sol-reference-card--en_espera { border-color: #2e5a9c; background: linear-gradient(110deg, #16263f, #182135); box-shadow: inset 4px 0 0 #4d8ef7; }
+.dark .sol-reference-card--completado { border-color: #2f6b44; background: linear-gradient(110deg, #14291c, #16241b); box-shadow: inset 4px 0 0 #34c468; }
+.dark .sol-reference-card--negado { border-color: #7c3a44; background: linear-gradient(110deg, #331e24, #2a1d22); box-shadow: inset 4px 0 0 #f05656; }
 .dark .sol-reference-divider { border-color: #324461; }
 .dark .sol-reference-name, .dark .sol-reference-clinic-name { color: #e2ecfc; }
 .dark .sol-reference-specialty { color: #75afff; }

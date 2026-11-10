@@ -118,6 +118,12 @@ const router = createRouter({
           meta: { permissions: ['dashboard.view'] },
         },
         {
+          path: 'bandeja',
+          name: 'bandeja',
+          component: () => import('@/views/inbox/InboxView.vue'),
+          meta: { permissions: ['inbox.view'] },
+        },
+        {
           path: 'reportes',
           name: 'reportes',
           redirect: '/',

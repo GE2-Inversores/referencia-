@@ -177,6 +177,7 @@ const mainItems: NavItem[] = [
   { to: '/clinicas', icon: 'Hospital', text: 'Clínicas', permission: 'clinicas.view' },
   { to: '/historico', icon: 'History', text: 'Historial', permission: 'historico.view' },
   { to: '/informes', icon: 'ChartColumn', text: 'Informes', permission: 'dashboard.view' },
+  { to: '/bandeja', icon: 'Inbox', text: 'Bandeja', permission: 'inbox.view' },
 ];
 
 const adminItems: NavItem[] = [

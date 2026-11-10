@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\ClinicaController;
 use App\Http\Controllers\Api\CurrentUserController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\IdentificationTypeController;
+use App\Http\Controllers\Api\InboxController;
 use App\Http\Controllers\Api\InformeController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\PermissionController;
@@ -65,6 +66,13 @@ Route::prefix('api')->name('api.')->group(function (): void {
 
         Route::get('informes', [InformeController::class, 'index'])->name('informes.index')->middleware('permission:dashboard.view');
         Route::get('informes/exportar', [InformeController::class, 'exportar'])->name('informes.exportar')->middleware('permission:dashboard.view');
+
+        Route::get('inbox', [InboxController::class, 'index'])->name('inbox.index')->middleware('permission:inbox.view');
+        Route::get('inbox/no-leidos', [InboxController::class, 'noLeidos'])->name('inbox.no-leidos')->middleware('permission:inbox.view');
+        Route::post('inbox/sincronizar', [InboxController::class, 'sincronizar'])->name('inbox.sincronizar')->middleware('permission:inbox.view');
+        Route::get('inbox/{mensaje}', [InboxController::class, 'show'])->name('inbox.show')->whereNumber('mensaje')->middleware('permission:inbox.view');
+        Route::post('inbox/{mensaje}/solicitud', [InboxController::class, 'crearSolicitud'])->name('inbox.solicitud')->whereNumber('mensaje')->middleware('permission:inbox.view|solicitudes.view');
+        Route::post('inbox/{mensaje}/negar', [InboxController::class, 'negar'])->name('inbox.negar')->whereNumber('mensaje')->middleware('permission:inbox.view|solicitudes.view');
 
         Route::get('user', CurrentUserController::class)->name('user');
         Route::put('user/profile', [CurrentUserController::class, 'updateProfile'])->name('user.profile.update');

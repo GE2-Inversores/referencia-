@@ -41,6 +41,8 @@ class SettingSeeder extends Seeder
             ['key' => 'postmark_token', 'value' => null, 'group' => 'mail', 'type' => 'string'],
             // Resend
             ['key' => 'resend_key', 'value' => null, 'group' => 'mail', 'type' => 'string'],
+            ['key' => 'gmail_buzon', 'value' => null, 'group' => 'mail', 'type' => 'string'],
+            ['key' => 'gmail_credenciales', 'value' => null, 'group' => 'mail', 'type' => 'string'],
 
             // API
             ['key' => 'api_rate_limit', 'value' => '60', 'group' => 'api', 'type' => 'integer'],
