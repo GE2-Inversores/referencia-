@@ -40,6 +40,12 @@ class InboxController extends Controller
             $consulta->where('leido', false);
         }
 
+        if ($request->filled('carpeta')) {
+            $request->input('carpeta') === 'entrada'
+                ? $consulta->whereNull('carpeta')
+                : $consulta->where('carpeta', $request->string('carpeta'));
+        }
+
         $pagina = $consulta->paginate(30);
 
         return response()->json([
@@ -49,6 +55,7 @@ class InboxController extends Controller
                 'pagina' => $pagina->currentPage(),
                 'paginas' => $pagina->lastPage(),
                 'no_leidos' => InboxMensaje::where('leido', false)->count(),
+                'carpetas' => $this->carpetas(),
             ],
             'gmail' => [
                 'configurado' => $gmail->configurado(),
@@ -56,6 +63,54 @@ class InboxController extends Controller
                 'ultima_sync' => $gmail->ultimaSync(),
                 'ultimo_error' => $gmail->ultimoError(),
             ],
+        ]);
+    }
+
+    /**
+     * Carpetas de gestión con su conteo: las dos de siempre más las que el
+     * personal haya creado al gestionar un correo.
+     *
+     * @return array<int, array{nombre: string, total: int}>
+     */
+    private function carpetas(): array
+    {
+        $conteos = InboxMensaje::whereNotNull('carpeta')
+            ->selectRaw('carpeta, count(*) as total')
+            ->groupBy('carpeta')
+            ->pluck('total', 'carpeta');
+
+        return collect(['Aceptaciones', 'Negaciones'])
+            ->merge($conteos->keys())
+            ->unique()
+            ->map(fn (string $nombre): array => ['nombre' => $nombre, 'total' => (int) ($conteos[$nombre] ?? 0)])
+            ->values()
+            ->all();
+    }
+
+    private function nombreCarpeta(Request $request, string $defecto): string
+    {
+        $nombre = trim((string) $request->input('carpeta'));
+
+        return $nombre !== '' ? mb_substr($nombre, 0, 60) : $defecto;
+    }
+
+    /**
+     * Cambia de carpeta un correo ya gestionado (radicado o negado).
+     */
+    public function moverCarpeta(Request $request, InboxMensaje $mensaje): JsonResponse
+    {
+        $validated = $request->validate(['carpeta' => ['required', 'string', 'max:60']]);
+
+        if (! $mensaje->gestion && ! SolicitudReferencia::where('inbox_mensaje_id', $mensaje->id)->exists()) {
+            return response()->json(['message' => 'Solo se pueden mover a una carpeta los correos ya gestionados.'], 422);
+        }
+
+        $mensaje->update(['carpeta' => trim($validated['carpeta'])]);
+
+        return response()->json([
+            'data' => $mensaje->fresh(),
+            'carpetas' => $this->carpetas(),
+            'message' => "Correo movido a la carpeta «{$mensaje->carpeta}».",
         ]);
     }
 
@@ -107,12 +162,15 @@ class InboxController extends Controller
             'tipo_aislamiento' => ['nullable', Rule::in(['contacto', 'respiratorio', 'cohortizado', 'vectores'])],
             'gestante' => ['nullable', 'boolean'],
             'condicion_especial' => ['nullable', 'string', 'max:250'],
+            'carpeta' => ['nullable', 'string', 'max:60'],
         ]);
 
         $recibido = $mensaje->recibido_en ? $mensaje->recibido_en->copy() : now();
         $quienResponde = $this->nombreUsuario($request);
 
-        $solicitud = DB::transaction(function () use ($validated, $mensaje, $recibido, $quienResponde): SolicitudReferencia {
+        $carpeta = $this->nombreCarpeta($request, 'Aceptaciones');
+
+        $solicitud = DB::transaction(function () use ($validated, $mensaje, $recibido, $quienResponde, $carpeta): SolicitudReferencia {
             $solicitud = SolicitudReferencia::create([
                 'inbox_mensaje_id' => $mensaje->id,
                 'origen' => 'correo',
@@ -181,6 +239,7 @@ class InboxController extends Controller
                 'gestion_por' => $quienResponde,
                 'gestion_at' => now(),
                 'gestion_detalle' => "Solicitud #{$solicitud->id} registrada.",
+                'carpeta' => $carpeta,
             ]);
 
             return $solicitud;
@@ -242,6 +301,7 @@ class InboxController extends Controller
             'observaciones' => ['nullable', 'string', 'max:1000'],
             'correos_extra' => ['nullable', 'array', 'max:10'],
             'correos_extra.*' => ['email', 'max:150'],
+            'carpeta' => ['nullable', 'string', 'max:60'],
         ]);
 
         $destinatarios = array_values(array_unique(array_filter([
@@ -286,6 +346,7 @@ class InboxController extends Controller
             'gestion_por' => $quienResponde,
             'gestion_at' => now(),
             'gestion_detalle' => $detalle.' · Notificado a: '.implode(', ', $destinatarios),
+            'carpeta' => $this->nombreCarpeta($request, 'Negaciones'),
         ]);
 
         return response()->json([

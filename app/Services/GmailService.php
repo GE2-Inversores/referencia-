@@ -13,6 +13,7 @@ use Google\Service\Gmail\Message;
 use Google\Service\Gmail\MessagePart;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
 
@@ -177,7 +178,7 @@ class GmailService
 
             foreach ($faltantes as $stub) {
                 $mensaje = $gmail->users_messages->get('me', $stub->getId(), ['format' => 'full']);
-                InboxMensaje::create($this->mapear($mensaje));
+                $this->crearMensaje($this->mapear($mensaje));
                 $agregados++;
 
                 if ($agregados >= $limite) {
@@ -228,12 +229,12 @@ class GmailService
             $examinados++;
 
             if (! InboxMensaje::where('gmail_id', 'imap-'.$mensaje->uid())->exists()) {
-                InboxMensaje::create($this->mapearImap($mensaje));
+                $this->guardarImap($mensaje);
                 $agregados++;
             }
 
             return $agregados < $limite;
-        }, 50);
+        }, 20);
 
         $this->marcarSync();
 
@@ -251,10 +252,106 @@ class GmailService
 
         $this->imapMailbox()->inbox()->idle(function (ImapMessage $mensaje): void {
             if (! InboxMensaje::where('gmail_id', 'imap-'.$mensaje->uid())->exists()) {
-                InboxMensaje::create($this->mapearImap($mensaje));
+                $this->guardarImap($mensaje);
             }
             $this->marcarSync();
         }, $completo, $segundos);
+    }
+
+    /**
+     * Guarda un correo IMAP sin que un mensaje defectuoso aborte la
+     * sincronización (y con ella a todos los más viejos): si falla al
+     * mapear o insertar, se reintenta con el texto saneado y, en último
+     * caso, con un registro mínimo — el correo nunca se pierde.
+     */
+    private function guardarImap(ImapMessage $mensaje): void
+    {
+        $uid = 'imap-'.$mensaje->uid();
+
+        try {
+            $datos = $this->mapearImap($mensaje);
+        } catch (Throwable $e) {
+            Log::warning('Bandeja: no se pudo leer el correo, se guarda un registro mínimo.', ['gmail_id' => $uid, 'error' => $e->getMessage()]);
+            $this->crearMensaje($this->registroMinimo($mensaje, $uid, 'No se pudo leer el contenido de este correo. Ábralo directamente en Gmail.'));
+
+            return;
+        }
+
+        $this->crearMensaje($datos);
+    }
+
+    /**
+     * @param  array<string, mixed>  $datos
+     */
+    private function crearMensaje(array $datos): void
+    {
+        try {
+            InboxMensaje::create($datos);
+
+            return;
+        } catch (Throwable $e) {
+            Log::warning('Bandeja: falló al guardar el correo, se reintenta saneado.', ['gmail_id' => $datos['gmail_id'] ?? null, 'error' => $e->getMessage()]);
+        }
+
+        try {
+            InboxMensaje::create($this->sanear($datos));
+
+            return;
+        } catch (Throwable $e) {
+            Log::error('Bandeja: el reintento saneado también falló, se guarda sin cuerpo.', ['gmail_id' => $datos['gmail_id'] ?? null, 'error' => $e->getMessage()]);
+        }
+
+        $minimo = $this->sanear($datos);
+        $minimo['cuerpo_html'] = null;
+        $minimo['cuerpo_texto'] = 'El contenido de este correo no se pudo guardar. Ábralo directamente en Gmail.';
+        $minimo['adjuntos'] = null;
+        $minimo['etiquetas'] = null;
+
+        InboxMensaje::create($minimo);
+    }
+
+    /**
+     * @param  array<string, mixed>  $datos
+     * @return array<string, mixed>
+     */
+    private function sanear(array $datos): array
+    {
+        $limpiar = function (mixed $valor) use (&$limpiar): mixed {
+            if (is_string($valor)) {
+                return mb_convert_encoding($valor, 'UTF-8', 'UTF-8');
+            }
+
+            return is_array($valor) ? array_map($limpiar, $valor) : $valor;
+        };
+
+        return array_map($limpiar, $datos);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function registroMinimo(ImapMessage $mensaje, string $uid, string $nota): array
+    {
+        $seguro = function (callable $leer, mixed $defecto = null): mixed {
+            try {
+                return $leer();
+            } catch (Throwable) {
+                return $defecto;
+            }
+        };
+
+        $de = $seguro(fn () => $mensaje->from());
+
+        return [
+            'gmail_id' => $uid,
+            'remitente' => mb_substr((string) $seguro(fn () => $de ? ($de->name().' <'.$de->email().'>') : '', ''), 0, 500),
+            'remitente_email' => $de ? mb_substr((string) $seguro(fn () => $de->email(), ''), 0, 255) : null,
+            'asunto' => mb_substr((string) $seguro(fn () => $mensaje->subject(), '(sin asunto)'), 0, 500),
+            'snippet' => mb_substr($nota, 0, 500),
+            'cuerpo_texto' => $nota,
+            'tiene_adjuntos' => false,
+            'recibido_en' => $seguro(fn () => Carbon::parse($mensaje->date() ?? 'now')->setTimezone(config('app.timezone')), now()),
+        ];
     }
 
     private function imapMailbox(): Mailbox

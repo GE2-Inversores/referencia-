@@ -142,6 +142,61 @@ class InboxTest extends TestCase
         $this->assertSame('radicada', $correo->fresh()->gestion);
     }
 
+    public function test_gestionar_guarda_el_correo_en_la_carpeta_elegida_o_la_de_defecto(): void
+    {
+        $staff = $this->staff();
+        $porDefecto = $this->correo();
+        $elegida = $this->correo();
+
+        $this->actingAs($staff)->postJson("/api/inbox/{$porDefecto->id}/solicitud", $this->datosSolicitud())->assertOk();
+        $this->actingAs($staff)->postJson("/api/inbox/{$elegida->id}/solicitud", $this->datosSolicitud() + ['carpeta' => 'Urgentes'])->assertOk();
+
+        $this->assertSame('Aceptaciones', $porDefecto->fresh()->carpeta);
+        $this->assertSame('Urgentes', $elegida->fresh()->carpeta);
+
+        $this->actingAs($staff)->getJson('/api/inbox?carpeta=Urgentes')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonFragment(['nombre' => 'Urgentes', 'total' => 1]);
+    }
+
+    public function test_mueve_de_carpeta_un_correo_gestionado_pero_no_uno_pendiente(): void
+    {
+        $staff = $this->staff();
+        $gestionado = $this->correo();
+        $pendiente = $this->correo();
+
+        $this->actingAs($staff)->postJson("/api/inbox/{$gestionado->id}/solicitud", $this->datosSolicitud())->assertOk();
+
+        $this->actingAs($staff)->postJson("/api/inbox/{$gestionado->id}/carpeta", ['carpeta' => 'Revisadas'])
+            ->assertOk()
+            ->assertJsonPath('data.carpeta', 'Revisadas');
+
+        $this->actingAs($staff)->postJson("/api/inbox/{$pendiente->id}/carpeta", ['carpeta' => 'Revisadas'])
+            ->assertStatus(422);
+
+        $this->assertNull($pendiente->fresh()->carpeta);
+    }
+
+    public function test_negar_usa_la_carpeta_negaciones_por_defecto_y_entrada_lista_los_pendientes(): void
+    {
+        $staff = $this->staff();
+        $negado = $this->correo();
+        $pendiente = $this->correo();
+
+        $this->actingAs($staff)->postJson("/api/inbox/{$negado->id}/negar", [
+            'grupo_negacion' => 'no_red',
+            'motivo_negacion' => 'Paciente no pertenece a la red',
+        ])->assertOk();
+
+        $this->assertSame('Negaciones', $negado->fresh()->carpeta);
+
+        $this->actingAs($staff)->getJson('/api/inbox?carpeta=entrada')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $pendiente->id);
+    }
+
     public function test_correo_con_adjuntos_registra_solicitud_aunque_no_haya_buzon(): void
     {
         $correo = $this->correo([

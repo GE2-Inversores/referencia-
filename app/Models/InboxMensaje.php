@@ -28,6 +28,7 @@ class InboxMensaje extends Model
         'gestion_por',
         'gestion_at',
         'gestion_detalle',
+        'carpeta',
     ];
 
     /**

@@ -11,6 +11,11 @@
             <button type="button" :class="{ 'inbx-tab-on': filtro === 'todos' }" @click="cambiarFiltro('todos')">Todos</button>
             <button type="button" :class="{ 'inbx-tab-on': filtro === 'no_leidos' }" @click="cambiarFiltro('no_leidos')">No leídos</button>
           </div>
+          <el-select v-model="filtroCarpeta" size="small" placeholder="Carpeta" clearable class="inbx-carpeta-filtro" @change="cambiarCarpeta">
+            <template #prefix><component :is="FolderIcon" class="w-3.5 h-3.5" /></template>
+            <el-option label="Entrada (sin gestionar)" value="entrada" />
+            <el-option v-for="c in carpetas" :key="c.nombre" :label="`${c.nombre} (${c.total})`" :value="c.nombre" />
+          </el-select>
           <el-input
             v-model="buscar"
             size="small"
@@ -133,6 +138,20 @@
                 </button>
               </div>
             </div>
+            <div v-if="seleccionado.gestion || seleccionado.solicitud" class="inbx-mover">
+              <component :is="FolderIcon" class="w-4 h-4" />
+              <span>Carpeta</span>
+              <el-select
+                :model-value="seleccionado.carpeta || ''"
+                size="small" filterable allow-create default-first-option
+                placeholder="Mover a una carpeta…"
+                class="inbx-mover-sel"
+                :disabled="moviendo"
+                @change="moverCarpeta"
+              >
+                <el-option v-for="n in nombresCarpetas" :key="n" :label="n" :value="n" />
+              </el-select>
+            </div>
             <p v-if="cargandoDetalle" class="inbx-vacio">Cargando mensaje…</p>
             <iframe
               v-else-if="seleccionado.cuerpo_html"
@@ -238,6 +257,13 @@
             <div>
               <label class="inbx-negar-label">Correos adicionales a notificar</label>
               <el-select v-model="formNegar.correos_extra" multiple filterable allow-create default-first-option :reserve-keyword="false" collapse-tags :max-collapse-tags="2" placeholder="Escribe correos y presiona Enter (opcional)" class="w-full" />
+            </div>
+
+            <div>
+              <label class="inbx-negar-label"><component :is="FolderIcon" class="w-3.5 h-3.5" /> Guardar el correo en la carpeta</label>
+              <el-select v-model="carpetaNegar" filterable allow-create default-first-option placeholder="Elige o escribe una carpeta" class="w-full" popper-class="negar-motivo-popper">
+                <el-option v-for="n in nombresCarpetas" :key="n" :label="n" :value="n" />
+              </el-select>
             </div>
           </div>
 
@@ -401,6 +427,12 @@
             <component :is="ClipIcon" class="w-3.5 h-3.5" />
             Este correo trae {{ seleccionado.adjuntos.length }} adjunto{{ seleccionado.adjuntos.length === 1 ? '' : 's' }} — se anexarán a la solicitud.
           </p>
+          <div class="inbx-carpeta-sel">
+            <label class="inbx-negar-label"><component :is="FolderIcon" class="w-3.5 h-3.5" /> Guardar el correo en la carpeta</label>
+            <el-select v-model="carpetaAceptar" filterable allow-create default-first-option placeholder="Elige o escribe una carpeta" class="w-full" popper-class="negar-motivo-popper">
+              <el-option v-for="n in nombresCarpetas" :key="n" :label="n" :value="n" />
+            </el-select>
+          </div>
           <footer class="inbx-negar-foot">
             <button type="button" class="inbx-negar-cancel" :disabled="registrando" @click="panelAceptar = false">Cancelar</button>
             <button type="button" class="inbx-negar-confirm inbx-aceptar-confirm" :disabled="registrando" @click="confirmarAceptacion">
@@ -419,6 +451,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import {
   Inbox as InboxIcon,
   Paperclip as ClipIcon,
+  Folder as FolderIcon,
   RefreshCw as RefreshIcon,
   Check as CheckIcon,
   X as XIcon,
@@ -453,6 +486,7 @@ interface InboxItem {
   gestion_por?: string | null;
   gestion_at?: string | null;
   gestion_detalle?: string | null;
+  carpeta?: string | null;
   solicitud?: { id: number; estado: string; nombre_quien_responde: string | null; created_at: string } | null;
 }
 
@@ -505,7 +539,14 @@ const formSol = ref({
   aislamiento: false, tipo_aislamiento: '', gestante: false, condicion_especial: '',
 });
 
+const carpetas = ref<{ nombre: string; total: number }[]>([{ nombre: 'Aceptaciones', total: 0 }, { nombre: 'Negaciones', total: 0 }]);
+const filtroCarpeta = ref('');
+const carpetaAceptar = ref('Aceptaciones');
+const carpetaNegar = ref('Negaciones');
+const nombresCarpetas = computed(() => carpetas.value.map((c) => c.nombre));
+
 function abrirNegar(): void {
+  carpetaNegar.value = 'Negaciones';
   const recibido = seleccionado.value?.recibido_en ?? '';
   fechaNegar.value = recibido.slice(0, 10);
   horaNegar.value = recibido.slice(11, 16);
@@ -516,6 +557,7 @@ function abrirNegar(): void {
 }
 
 function abrirAceptar(): void {
+  carpetaAceptar.value = 'Aceptaciones';
   const recibido = seleccionado.value?.recibido_en ?? '';
   fechaNegar.value = recibido.slice(0, 10);
   horaNegar.value = recibido.slice(11, 16);
@@ -544,7 +586,7 @@ async function confirmarAceptacion(): Promise<void> {
   }
   try {
     registrando.value = true;
-    const { data } = await http.post(`/api/inbox/${seleccionado.value!.id}/solicitud`, f);
+    const { data } = await http.post(`/api/inbox/${seleccionado.value!.id}/solicitud`, { ...f, carpeta: carpetaAceptar.value });
     notify.success(data.message || 'Solicitud registrada.');
     if (seleccionado.value && data.data) {
       seleccionado.value.solicitud = {
@@ -556,14 +598,17 @@ async function confirmarAceptacion(): Promise<void> {
       seleccionado.value.gestion = 'radicada';
       seleccionado.value.gestion_por = data.data.nombre_quien_responde;
       seleccionado.value.gestion_detalle = `Solicitud #${data.data.id} registrada.`;
+      seleccionado.value.carpeta = carpetaAceptar.value;
       const item = mensajes.value.find((m) => m.id === seleccionado.value!.id);
       if (item) {
         item.solicitud = seleccionado.value.solicitud;
         item.gestion = 'radicada';
         item.gestion_por = seleccionado.value.gestion_por;
+        item.carpeta = carpetaAceptar.value;
       }
     }
     panelAceptar.value = false;
+    void cargar(true);
   } catch (e: any) {
     notify.error(e.response?.data?.message || 'No se pudo registrar la solicitud.');
   } finally {
@@ -586,6 +631,7 @@ async function confirmarNegacion(): Promise<void> {
       motivo_negacion: f.motivo_negacion.trim(),
       observaciones: f.observaciones?.trim() || undefined,
       correos_extra: f.correos_extra,
+      carpeta: carpetaNegar.value,
     });
     notify.success(data.message || 'El correo quedó marcado como negado.');
     if (seleccionado.value && data.data) {
@@ -593,14 +639,17 @@ async function confirmarNegacion(): Promise<void> {
       seleccionado.value.gestion_por = data.data.gestion_por;
       seleccionado.value.gestion_at = data.data.gestion_at;
       seleccionado.value.gestion_detalle = data.data.gestion_detalle;
+      seleccionado.value.carpeta = data.data.carpeta;
       const item = mensajes.value.find((m) => m.id === seleccionado.value!.id);
       if (item) {
         item.gestion = data.data.gestion;
         item.gestion_por = data.data.gestion_por;
         item.gestion_detalle = data.data.gestion_detalle;
+        item.carpeta = data.data.carpeta;
       }
     }
     panelNegar.value = false;
+    void cargar(true);
   } catch (e: any) {
     notify.error(e.response?.data?.message || 'No se pudo negar el correo.');
   } finally {
@@ -625,11 +674,13 @@ async function cargar(reiniciar = false): Promise<void> {
         page: pagina,
         q: buscar.value || undefined,
         filtro: filtro.value === 'no_leidos' ? 'no_leidos' : undefined,
+        carpeta: filtroCarpeta.value || undefined,
       },
     });
     mensajes.value = reiniciar ? data.data : [...mensajes.value, ...data.data];
     meta.value = { total: data.meta.total, pagina: data.meta.pagina, paginas: data.meta.paginas };
     noLeidos.value = data.meta.no_leidos;
+    carpetas.value = data.meta.carpetas ?? carpetas.value;
     gmail.value = data.gmail;
   } catch {
     notify.error('No se pudo cargar la bandeja.');
@@ -641,6 +692,32 @@ async function cargar(reiniciar = false): Promise<void> {
 function cambiarFiltro(f: 'todos' | 'no_leidos'): void {
   if (filtro.value === f) return;
   filtro.value = f;
+  seleccionado.value = null;
+  void cargar(true);
+}
+
+const moviendo = ref(false);
+
+async function moverCarpeta(nombre: string): Promise<void> {
+  const m = seleccionado.value;
+  if (!m || !nombre?.trim()) return;
+  try {
+    moviendo.value = true;
+    const { data } = await http.post(`/api/inbox/${m.id}/carpeta`, { carpeta: nombre.trim() });
+    m.carpeta = data.data.carpeta;
+    const item = mensajes.value.find((x) => x.id === m.id);
+    if (item) item.carpeta = data.data.carpeta;
+    carpetas.value = data.carpetas ?? carpetas.value;
+    notify.success(data.message);
+    if (filtroCarpeta.value && filtroCarpeta.value !== m.carpeta) void cargar(true);
+  } catch (e: any) {
+    notify.error(e.response?.data?.message || 'No se pudo mover el correo.');
+  } finally {
+    moviendo.value = false;
+  }
+}
+
+function cambiarCarpeta(): void {
   seleccionado.value = null;
   void cargar(true);
 }
@@ -727,9 +804,11 @@ async function refrescar(): Promise<void> {
         page: 1,
         q: buscar.value || undefined,
         filtro: filtro.value === 'no_leidos' ? 'no_leidos' : undefined,
+        carpeta: filtroCarpeta.value || undefined,
       },
     });
     noLeidos.value = data.meta.no_leidos;
+    carpetas.value = data.meta.carpetas ?? carpetas.value;
     gmail.value = data.gmail;
     meta.value.total = data.meta.total;
     meta.value.paginas = data.meta.paginas;
@@ -777,6 +856,12 @@ onUnmounted(() => window.clearInterval(temporizador));
 .dark .inbx-tabs button { color: #cbd5e1; }
 .dark .inbx-tabs button.inbx-tab-on { background: #4f46e5; }
 .inbx-search { width: 220px; }
+.inbx-carpeta-filtro { width: 190px; }
+.inbx-mover { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 6px 10px; font-size: 11.5px; font-weight: 700; color: #475569; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; }
+.inbx-mover-sel { width: 220px; }
+.dark .inbx-mover { color: #cbd5e1; background: #161b28; border-color: #2c3f5e; }
+.inbx-carpeta-sel { margin: 0 14px 8px; }
+.inbx-negar-label svg { display: inline-block; vertical-align: -2px; margin-right: 2px; }
 .inbx-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 5px 14px; border: none; border-radius: 10px; background: linear-gradient(135deg, #2563eb, #1d4ed8); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 12px rgba(37,99,235,.25); }
 .inbx-btn:disabled { opacity: .5; cursor: not-allowed; }
 
