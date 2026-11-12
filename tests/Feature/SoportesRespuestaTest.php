@@ -54,6 +54,7 @@ class SoportesRespuestaTest extends TestCase
                 'hora_respuesta' => '10:00',
                 'nombre_quien_responde' => 'Super Administrador',
                 'sin_disponibilidad' => '1',
+                'lugar_llegada' => 'UCI',
                 'eps' => 'SANITAS EPS',
                 'soportes' => [UploadedFile::fake()->image('evidencia.png'), UploadedFile::fake()->create('autorizacion.pdf', 20, 'application/pdf')],
             ], ['Accept' => 'application/json'])

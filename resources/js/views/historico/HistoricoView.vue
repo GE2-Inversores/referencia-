@@ -737,6 +737,7 @@ interface Solicitud {
   direccion_paciente?: string;
   telefono_paciente?: string;
   especialidad_requerida: string;
+  lugar_llegada?: string;
   servicio_ubicacion_actual: string;
   servicio_remision?: string;
   quien_remitente?: string;
@@ -1442,7 +1443,7 @@ function abrirCambiar(s: Solicitud) {
     sede: s.sede || '',
     codigo_aceptacion: '',
     hora_llegada: '',
-    lugar_llegada: '',
+    lugar_llegada: s.lugar_llegada || '',
     numero_ingreso: '',
     eps: EPS_LIST.includes(s.eps) ? s.eps : '',
     grupo_negacion: '',

@@ -197,6 +197,7 @@ class InboxTest extends TestCase
 
         $datos = [
             'sin_disponibilidad' => true,
+            'lugar_llegada' => 'UCI',
             'hora_respuesta' => '10:30',
             'nombre_quien_responde' => 'Super Administrador',
         ];

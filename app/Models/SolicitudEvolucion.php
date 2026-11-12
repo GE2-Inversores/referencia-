@@ -20,6 +20,12 @@ class SolicitudEvolucion extends Model
         return $this->belongsTo(SolicitudReferencia::class, 'solicitud_referencia_id');
     }
 
+    /** Respuestas del personal de referencia a esta evolución, de la más antigua a la más reciente. */
+    public function respuestas(): HasMany
+    {
+        return $this->hasMany(SolicitudEvolucionRespuesta::class, 'solicitud_evolucion_id')->oldest();
+    }
+
     /** Soportes clínicos que la clínica adjuntó con esta evolución. */
     public function adjuntos(): HasMany
     {

@@ -170,6 +170,14 @@
                           {{ formatFecha(nota.created_at) }} · {{ formatHoraNota(nota.created_at) }}
                         </div>
                         <p class="evo-nota-texto">{{ nota.nota }}</p>
+                        <div v-for="r in nota.respuestas" :key="r.id" class="evo-respuesta">
+                          <div class="evo-respuesta-head">
+                            <component :is="MessageIcon" class="w-3 h-3" />
+                            Respuesta de Referencia<span v-if="r.respondido_por"> · {{ r.respondido_por }}</span>
+                            <time>{{ formatFecha(r.created_at) }} · {{ formatHoraNota(r.created_at) }}</time>
+                          </div>
+                          <p>{{ r.mensaje }}</p>
+                        </div>
                       </div>
                     </div>
                   </template>
@@ -231,7 +239,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive } from 'vue';
-import { Search as SearchIcon, Clock as ClockIcon, Activity as ActivityIcon, CheckCircle as CheckCircleIcon, Send as SendIcon, Loader2 as LoaderIcon, Calendar as CalendarIcon, User as UserIcon, Building2 as BuildingIcon, Stethoscope as StethoscopeIcon, ClipboardList as ClipboardIcon, Paperclip as PaperclipIcon, ShieldCheck as ShieldIcon, X as XIcon } from '@lucide/vue';
+import { Search as SearchIcon, Clock as ClockIcon, Activity as ActivityIcon, CheckCircle as CheckCircleIcon, Send as SendIcon, Loader2 as LoaderIcon, Calendar as CalendarIcon, User as UserIcon, Building2 as BuildingIcon, Stethoscope as StethoscopeIcon, ClipboardList as ClipboardIcon, Paperclip as PaperclipIcon, ShieldCheck as ShieldIcon, MessageSquare as MessageIcon, X as XIcon } from '@lucide/vue';
 import { useRoute } from 'vue-router';
 import { ElInput } from 'element-plus';
 import http from '@/plugins/axios';
@@ -239,10 +247,18 @@ import notify from '@/plugins/toast';
 import { epsBase } from '@/data/referencia';
 import { useClinicaAuthStore } from '@/stores/clinicaAuth';
 
+interface RespuestaEvolucion {
+  id: number;
+  mensaje: string;
+  respondido_por: string | null;
+  created_at: string;
+}
+
 interface Evolucion {
   id: number;
   nota: string;
   created_at: string;
+  respuestas?: RespuestaEvolucion[];
 }
 
 interface Solicitud {
@@ -1114,6 +1130,29 @@ onMounted(async () => {
   white-space: pre-line;
 }
 .dark .evo-nota-texto { color: #cbd5e1; }
+
+.evo-respuesta {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid #bbf7d0;
+  border-left: 3px solid #16a34a;
+  border-radius: 10px;
+  background: #f0fdf4;
+}
+.evo-respuesta-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  color: #166534;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.evo-respuesta-head time { margin-left: auto; color: #64748b; font-weight: 500; }
+.evo-respuesta p { margin: 4px 0 0; color: #14532d; font-size: 12px; line-height: 1.5; white-space: pre-line; }
+.dark .evo-respuesta { border-color: #166534; background: rgba(22, 163, 74, .12); }
+.dark .evo-respuesta-head { color: #86efac; }
+.dark .evo-respuesta p { color: #dcfce7; }
 
 .evo-sin-notas {
   margin: 0;

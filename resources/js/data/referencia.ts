@@ -28,6 +28,17 @@ export function epsBase(eps: string | null | undefined): string {
 /** Lista para clínicas externas: cada EPS una sola vez, sin PGP / Evento. */
 export const EPS_LIST_EXTERNA = Array.from(new Set(EPS_LIST.map(epsBase)));
 
+/** Lugares a donde puede ser referido un paciente. A la clínica le llega solo cuando ya hay código de aceptación. */
+export const LUGARES_LLEGADA = [
+  { label: 'Urgencias', value: 'URGENCIAS' },
+  { label: 'UCI', value: 'UCI' },
+  { label: 'UCIN', value: 'UCIN' },
+  { label: 'Hospitalización 2do', value: 'HOSPITALIZACION 2DO' },
+  { label: 'Hospitalización 8vo', value: 'HOSPITALIZACION 8VO' },
+  { label: 'Hospitalización 7mo', value: 'HOSPITALIZACION 7MO' },
+  { label: 'Angiografía/Hemodinamia', value: 'ANGIOGRAFIA/HEMODINAMIA' },
+];
+
 export const ESPECIALIDADES = [
   'AYUDA DIAGNOSTICA','CARDIOLOGIA','CIRUGIA CARDIOVASCULAR','CIRUGIA DE CABEZA Y CUELLO',
   'CIRUGIA DE COLUMNA','CIRUGIA DE MANO','CIRUGIA DE MIEMBRO SUPERIOR','CIRUGIA DE PELVIS',

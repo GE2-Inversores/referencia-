@@ -440,7 +440,7 @@ class SolicitudReferenciaController extends Controller
 
         $query = SolicitudReferencia::whereIn('estado', ['pendiente', 'pendiente_cama', 'en_espera'])
             ->with([
-                'evoluciones',
+                'evoluciones.respuestas',
                 'diagnosticos',
                 'clinica:id,nombre',
                 'adjuntos:id,solicitud_referencia_id,nombre_original,mime_type,tamano',
@@ -539,7 +539,7 @@ class SolicitudReferenciaController extends Controller
 
         return response()->json([
             'data' => $evolucion,
-            'solicitud' => $solicitud->load(['evoluciones', 'adjuntos:id,solicitud_referencia_id,nombre_original,mime_type,tamano']),
+            'solicitud' => $solicitud->load(['evoluciones.respuestas', 'adjuntos:id,solicitud_referencia_id,nombre_original,mime_type,tamano']),
             'message' => 'Evolución registrada',
         ], 201);
     }

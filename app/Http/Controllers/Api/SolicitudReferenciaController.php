@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\RespuestaEvolucionClinica;
 use App\Mail\SolicitudEvolucionClinica;
 use App\Models\Notification;
+use App\Models\SolicitudEvolucion;
 use App\Models\SolicitudReferencia;
 use App\Models\SolicitudReferenciaAdjunto;
 use App\Models\SolicitudReferenciaEvento;
@@ -30,7 +32,7 @@ class SolicitudReferenciaController extends Controller
     {
         abort_unless(request()->user()->hasPermission('clinicas.view'), Response::HTTP_FORBIDDEN);
 
-        $solicitudes = SolicitudReferencia::with(['clinica', 'adjuntos', 'diagnosticos', 'eventos', 'evoluciones.adjuntos'])
+        $solicitudes = SolicitudReferencia::with(['clinica', 'adjuntos', 'diagnosticos', 'eventos', 'evoluciones.adjuntos', 'evoluciones.respuestas'])
             ->whereIn('estado', ['pendiente', 'pendiente_cama', 'en_espera'])
             ->orderByRaw("FIELD(estado, 'pendiente', 'pendiente_cama', 'en_espera')")
             ->orderBy('created_at', 'desc')
@@ -44,7 +46,7 @@ class SolicitudReferenciaController extends Controller
     {
         abort_unless(request()->user()->hasPermission('clinicas.view'), Response::HTTP_FORBIDDEN);
 
-        $solicitudes = SolicitudReferencia::with(['clinica', 'adjuntos', 'diagnosticos', 'eventos', 'evoluciones.adjuntos'])
+        $solicitudes = SolicitudReferencia::with(['clinica', 'adjuntos', 'diagnosticos', 'eventos', 'evoluciones.adjuntos', 'evoluciones.respuestas'])
             ->whereIn('estado', ['completado', 'negado', 'cancelado'])
             ->orderBy('updated_at', 'desc')
             ->get();
@@ -79,7 +81,9 @@ class SolicitudReferenciaController extends Controller
             // exige cuando sí hay cupo disponible.
             'codigo_aceptacion' => ['nullable', Rule::requiredIf(fn () => ! $sinDisponibilidad), 'string', 'max:20', Rule::unique('solicitudes_referencia', 'codigo_aceptacion')->ignore($solicitud->id)],
             'hora_llegada' => ['nullable', Rule::requiredIf(fn () => ! $sinDisponibilidad), 'date_format:H:i'],
-            'lugar_llegada' => ['nullable', Rule::requiredIf(fn () => ! $sinDisponibilidad), 'string', 'max:150'],
+            // El lugar de referencia se define siempre; sin cupo solo se guarda y
+            // NO viaja a la clínica hasta que se asigne el código de aceptación.
+            'lugar_llegada' => ['required', 'string', 'max:150'],
             'sede' => ['nullable', Rule::requiredIf(fn () => ! $sinDisponibilidad), Rule::in(['URGENCIAS', 'CENTRAL DE ESPECIALISTAS', 'CAC SANTA BARBARA'])],
             // EPS confirmada al momento de la respuesta — el operador la
             // valida/corrige y queda guardada en la solicitud.
@@ -100,6 +104,7 @@ class SolicitudReferenciaController extends Controller
             // disponibilidad — entonces se envía el código y pasa a en_espera.
             $solicitud->update([
                 'estado' => 'pendiente_cama',
+                'lugar_llegada' => $validated['lugar_llegada'],
                 'eps' => $validated['eps'],
                 'hora_respuesta' => $validated['hora_respuesta'],
                 'nombre_quien_responde' => $validated['nombre_quien_responde'],
@@ -235,6 +240,75 @@ class SolicitudReferenciaController extends Controller
         );
 
         return response()->json(['data' => $solicitud->load('eventos'), 'message' => 'Solicitud de evolución enviada a '.implode(', ', $destinatarios)]);
+    }
+
+    /**
+     * El personal de referencia responde, con texto libre, a una evolución que
+     * la clínica registró. La respuesta queda guardada junto a la evolución
+     * (se ve en el módulo de Evolución y en el detalle) y se envía por correo
+     * a la clínica. Si el correo no sale, la respuesta igual queda registrada.
+     */
+    public function responderEvolucion(Request $request, SolicitudReferencia $solicitud, SolicitudEvolucion $evolucion): JsonResponse
+    {
+        abort_unless($request->user()->hasPermission('clinicas.view'), Response::HTTP_FORBIDDEN);
+        abort_unless($evolucion->solicitud_referencia_id === $solicitud->id, Response::HTTP_NOT_FOUND);
+
+        $validated = $request->validate([
+            'mensaje' => ['required', 'string', 'max:2000'],
+            'correo_extra' => ['nullable', 'email', 'max:150'],
+            'correos_extra' => ['nullable', 'array', 'max:10'],
+            'correos_extra.*' => ['email', 'max:150'],
+        ]);
+
+        $usuario = $request->user();
+        $respuesta = $evolucion->respuestas()->create([
+            'solicitud_referencia_id' => $solicitud->id,
+            'mensaje' => trim($validated['mensaje']),
+            'respondido_por' => trim(implode(' ', array_filter([$usuario->first_name, $usuario->middle_name, $usuario->last_name, $usuario->sur_name]))) ?: null,
+        ]);
+
+        $solicitud->load('clinica');
+        $destinatarios = $this->destinatariosClinica($solicitud, $this->correosExtraValidados($validated));
+        $enviado = false;
+
+        if ($destinatarios !== []) {
+            try {
+                Mail::to($destinatarios)->send(new RespuestaEvolucionClinica($solicitud, $respuesta->setRelation('evolucion', $evolucion)));
+                $enviado = true;
+                $respuesta->update(['correo_enviado' => true]);
+            } catch (Throwable $e) {
+                Log::error('No se pudo enviar la respuesta a la evolución', [
+                    'solicitud_id' => $solicitud->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        SolicitudReferenciaEvento::create([
+            'solicitud_referencia_id' => $solicitud->id,
+            'tipo' => 'evolucion_respuesta',
+            'titulo' => 'Respuesta a la evolución',
+            'descripcion' => $respuesta->mensaje.($enviado ? ' (enviada a '.implode(', ', $destinatarios).')' : ' (sin enviar por correo)'),
+        ]);
+
+        $this->notificarClinica(
+            $solicitud,
+            'Respuesta a su evolución',
+            "Referencia respondió la evolución de {$solicitud->primer_nombre} {$solicitud->primer_apellido}.",
+            'info',
+        );
+
+        $mensaje = $enviado
+            ? 'Respuesta enviada a '.implode(', ', $destinatarios)
+            : ($destinatarios === []
+                ? 'Respuesta guardada. La clínica no tiene correo registrado, solo la verá en el módulo de Evolución.'
+                : 'Respuesta guardada, pero el correo no se pudo enviar. La clínica la verá en el módulo de Evolución.');
+
+        return response()->json([
+            'data' => $evolucion->load('respuestas', 'adjuntos'),
+            'correo_enviado' => $enviado,
+            'message' => $mensaje,
+        ]);
     }
 
     public function negar(Request $request, SolicitudReferencia $solicitud): JsonResponse
@@ -648,7 +722,7 @@ class SolicitudReferenciaController extends Controller
      */
     private function conRelaciones(SolicitudReferencia $solicitud): SolicitudReferencia
     {
-        return $solicitud->load(['clinica', 'adjuntos', 'diagnosticos', 'eventos', 'evoluciones.adjuntos']);
+        return $solicitud->load(['clinica', 'adjuntos', 'diagnosticos', 'eventos', 'evoluciones.adjuntos', 'evoluciones.respuestas']);
     }
 
     /**

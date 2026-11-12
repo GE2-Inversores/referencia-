@@ -438,6 +438,7 @@
                   <div v-if="solicitudSeleccionada.telefono_contacto" class="data-row"><span>Teléfono</span><strong>{{ solicitudSeleccionada.telefono_contacto }}</strong></div>
                   <div v-if="solicitudSeleccionada.correo_contacto" class="data-row"><span>Correo</span><strong>{{ solicitudSeleccionada.correo_contacto }}</strong></div>
                   <div v-if="solicitudSeleccionada.codigo_aceptacion" class="data-row"><span>Código Gomedisys</span><strong class="font-mono">{{ solicitudSeleccionada.codigo_aceptacion }}</strong></div>
+                  <div v-if="solicitudSeleccionada.estado === 'pendiente_cama' && solicitudSeleccionada.lugar_llegada" class="data-row"><span>Lugar de referencia</span><strong>{{ solicitudSeleccionada.lugar_llegada }} <small class="text-gray-400">(se envía con el código)</small></strong></div>
                   <div v-if="solicitudSeleccionada.hora_llegada" class="data-row"><span>Llegada esperada</span><strong>{{ formatHora(solicitudSeleccionada.hora_llegada) }} · {{ solicitudSeleccionada.lugar_llegada }}<template v-if="solicitudSeleccionada.sede"> · Sede {{ solicitudSeleccionada.sede }}</template></strong></div>
                   <p v-if="!solicitudSeleccionada.quien_remitente && !solicitudSeleccionada.telefono_contacto && !solicitudSeleccionada.correo_contacto" class="text-xs text-gray-400 italic">Sin datos adicionales de remisión</p>
                 </div>
@@ -614,6 +615,37 @@
                       <small>{{ formatTamano(adj.tamano) }}</small>
                     </a>
                   </div>
+
+                  <div v-for="r in evolucion.respuestas" :key="r.id" class="evoluciones-respuesta">
+                    <div class="evoluciones-respuesta-head">
+                      <component :is="MessageIcon" class="w-3.5 h-3.5" />
+                      <strong>{{ r.respondido_por || 'Referencia' }}</strong>
+                      <time>{{ formatFecha(r.created_at) }} · {{ horaDeFecha(r.created_at) }}</time>
+                      <span v-if="r.correo_enviado" class="evoluciones-respuesta-mail" title="Se envió por correo a la clínica">
+                        <component :is="MailIcon" class="w-3 h-3" /> Enviada por correo
+                      </span>
+                    </div>
+                    <p>{{ r.mensaje }}</p>
+                  </div>
+
+                  <div v-if="evolucion.responder" class="evoluciones-responder">
+                    <textarea
+                      v-model="respuestaDraft[evolucion.id]"
+                      rows="2"
+                      maxlength="2000"
+                      class="evoluciones-responder-input"
+                      placeholder="Escriba su respuesta a esta evolución. Se envía por correo a la clínica y queda en el módulo de Evolución…"
+                    ></textarea>
+                    <button
+                      type="button"
+                      class="evoluciones-responder-btn"
+                      :disabled="!(respuestaDraft[evolucion.id] ?? '').trim() || respondiendoId !== null"
+                      @click="responderEvolucion(evolucion.id)"
+                    >
+                      <component :is="SendIcon" class="w-3.5 h-3.5" />
+                      {{ respondiendoId === evolucion.id ? 'Enviando…' : 'Responder' }}
+                    </button>
+                  </div>
                 </div>
               </article>
             </div>
@@ -694,6 +726,68 @@
       </div>
     </el-dialog>
 
+    <!-- ── Modal: Solicitar evolución por correo ── -->
+    <el-dialog v-model="modalSolicitarEvolucion" width="560px" class="accion-dialog" :show-close="false" align-center>
+      <template v-if="solicitudSeleccionada">
+        <div class="detalle-content">
+          <button type="button" class="detalle-close-btn" @click="modalSolicitarEvolucion = false">
+            <component :is="XIcon" class="w-4 h-4" />
+          </button>
+          <div class="detalle-head">
+            <div class="detalle-head-pattern"></div>
+            <div class="detalle-head-icon accion-icon-info">
+              <component :is="SendIcon" class="w-6 h-6" />
+            </div>
+            <div class="detalle-head-info">
+              <p class="detalle-head-title">Solicitar evolución</p>
+              <p class="detalle-head-sub">{{ idInterno(solicitudSeleccionada.id) }} · se envía por correo a la clínica</p>
+            </div>
+          </div>
+
+          <div class="detalle-body">
+            <div class="accion-patient-card">
+              <div class="accion-patient-avatar">{{ inicialesPaciente(solicitudSeleccionada) }}</div>
+              <div class="accion-patient-info">
+                <strong>{{ nombreCompleto(solicitudSeleccionada) }}</strong>
+                <span>{{ solicitudSeleccionada.clinica?.nombre ?? solicitudSeleccionada.institucion_remitente ?? 'Clínica remitente' }} · {{ solicitudSeleccionada.especialidad_requerida }}</span>
+              </div>
+            </div>
+
+            <div class="detalle-card">
+              <div class="card-body accion-form-body">
+                <div class="mb-1.5">
+                  <label class="accion-field-label">Mensaje para la clínica</label>
+                  <el-input
+                    v-model="formEvolucion.mensaje"
+                    type="textarea"
+                    :rows="4"
+                    maxlength="1000"
+                    show-word-limit
+                    placeholder="Escriba aquí lo que necesita que la clínica conozca o envíe (opcional). Irá en el correo junto al enlace al módulo de Evolución."
+                  />
+                </div>
+                <div class="mb-1.5">
+                  <label class="accion-field-label">Correo de notificación a la clínica</label>
+                  <div class="correo-destino-row">
+                    <span class="correo-destino-chip" :title="correoDestinoClinica">{{ correoDestinoClinica }}</span>
+                    <el-select v-model="formEvolucion.correos_extra" multiple filterable allow-create default-first-option :reserve-keyword="false" collapse-tags :max-collapse-tags="2" placeholder="Agregar otro correo y presionar Enter (opcional)" class="flex-1" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="detalle-footer">
+            <button type="button" class="accion-cancelar-btn" @click="modalSolicitarEvolucion = false">Cancelar</button>
+            <button type="button" class="accion-confirmar-btn accion-confirmar-info" :disabled="enviandoEvolucion" @click="enviarSolicitudEvolucion">
+              <component :is="enviandoEvolucion ? Loader2Icon : SendIcon" class="w-3.5 h-3.5" :class="{ 'animate-spin': enviandoEvolucion }" />
+              Enviar solicitud
+            </button>
+          </div>
+        </div>
+      </template>
+    </el-dialog>
+
     <!-- ── Modal: Aceptar ── -->
     <el-dialog v-model="modalAceptar" width="680px" class="accion-dialog" :show-close="false" align-center>
       <template v-if="solicitudSeleccionada">
@@ -772,6 +866,13 @@
                   <component :is="SendIcon" class="w-3.5 h-3.5 shrink-0" />
                   <span>A la clínica le llegará: <strong>«Paciente aceptado en espera de cupo — le estaremos enviando el código cuando haya disponibilidad»</strong>. Cuando haya cupo, usa «Asignar cupo y enviar código» desde el menú de la fila.</span>
                 </div>
+                <div v-if="formAceptar.sin_disponibilidad" class="mb-1.5">
+                  <label class="accion-field-label">Lugar al que será referido <span class="accion-required">*</span></label>
+                  <el-select v-model="formAceptar.lugar_llegada" placeholder="Seleccione el servicio" class="w-full" popper-class="negar-motivo-popper">
+                    <el-option v-for="l in LUGARES_LLEGADA" :key="l.value" :label="l.label" :value="l.value" />
+                  </el-select>
+                  <p class="accion-field-hint">Queda guardado para el personal de referencia. No se envía a la clínica hasta que se asigne el código de aceptación.</p>
+                </div>
                 <template v-if="!formAceptar.sin_disponibilidad">
                 <div class="accion-gomedisys-callout mb-1.5">
                   <div class="accion-gomedisys-callout-text">
@@ -815,13 +916,7 @@
                   <div>
                     <label class="accion-field-label">Lugar <span class="accion-required">*</span></label>
                     <el-select v-model="formAceptar.lugar_llegada" placeholder="Seleccione el servicio" class="w-full" popper-class="negar-motivo-popper">
-                      <el-option label="Urgencias" value="URGENCIAS" />
-                      <el-option label="UCI" value="UCI" />
-                      <el-option label="UCIN" value="UCIN" />
-                      <el-option label="Hospitalización 2do" value="HOSPITALIZACION 2DO" />
-                      <el-option label="Hospitalización 8vo" value="HOSPITALIZACION 8VO" />
-                      <el-option label="Hospitalización 7mo" value="HOSPITALIZACION 7MO" />
-                      <el-option label="Angiografía/Hemodinamia" value="ANGIOGRAFIA/HEMODINAMIA" />
+                      <el-option v-for="l in LUGARES_LLEGADA" :key="l.value" :label="l.label" :value="l.value" />
                     </el-select>
                   </div>
                 </div>
@@ -1090,13 +1185,7 @@
                   <div>
                     <label class="accion-field-label">Lugar <span class="accion-required">*</span></label>
                     <el-select v-model="formCambiar.lugar_llegada" placeholder="Seleccione el servicio" class="w-full" popper-class="negar-motivo-popper">
-                      <el-option label="Urgencias" value="URGENCIAS" />
-                      <el-option label="UCI" value="UCI" />
-                      <el-option label="UCIN" value="UCIN" />
-                      <el-option label="Hospitalización 2do" value="HOSPITALIZACION 2DO" />
-                      <el-option label="Hospitalización 8vo" value="HOSPITALIZACION 8VO" />
-                      <el-option label="Hospitalización 7mo" value="HOSPITALIZACION 7MO" />
-                      <el-option label="Angiografía/Hemodinamia" value="ANGIOGRAFIA/HEMODINAMIA" />
+                      <el-option v-for="l in LUGARES_LLEGADA" :key="l.value" :label="l.label" :value="l.value" />
                     </el-select>
                   </div>
                 </div>
@@ -1397,7 +1486,6 @@ import { useRoute, useRouter } from 'vue-router';
 import { usePolling } from '@/lib/usePolling';
 import { actualizarSiCambio } from '@/lib/silentRefresh';
 import { useStorage, useDebounceFn, onClickOutside } from '@vueuse/core';
-import { ElMessageBox } from 'element-plus';
 import notify from '@/plugins/toast';
 import { exportarSolicitudPdf } from '@/lib/exportarSolicitudPdf';
 import {
@@ -1437,6 +1525,7 @@ import {
   UserX as UserXIcon,
   Users as UsersIcon,
   Mail as MailIcon,
+  MessageSquare as MessageIcon,
   MonitorSmartphone as MonitorSmartphoneIcon,
   StickyNote as StickyNoteIcon,
 } from '@lucide/vue';
@@ -1446,7 +1535,7 @@ import StatCard from '@/components/ui/StatCard.vue';
 import DateRangeFilter from '@/components/ui/DateRangeFilter.vue';
 import PanelHelp from '@/components/ui/PanelHelp.vue';
 import { autocompletarEnGomedisys } from '@/lib/gomedisys';
-import { EPS_LIST } from '@/data/referencia';
+import { EPS_LIST, LUGARES_LLEGADA } from '@/data/referencia';
 import { useAuthStore } from '@/stores/auth';
 
 const authStore = useAuthStore();
@@ -1517,7 +1606,16 @@ interface Solicitud {
     nota: string;
     created_at: string;
     adjuntos?: { id: number; nombre_original: string; mime_type: string; tamano: number }[];
+    respuestas?: RespuestaEvolucion[];
   }[];
+  created_at: string;
+}
+
+interface RespuestaEvolucion {
+  id: number;
+  mensaje: string;
+  respondido_por: string | null;
+  correo_enviado: boolean;
   created_at: string;
 }
 
@@ -1587,6 +1685,9 @@ const modalDetalle = ref(false);
 const modalEvoluciones = ref(false);
 
 const modalAceptar = ref(false);
+const modalSolicitarEvolucion = ref(false);
+const enviandoEvolucion = ref(false);
+const formEvolucion = ref<{ mensaje: string; correos_extra: string[] }>({ mensaje: '', correos_extra: [] });
 const modalNegar = ref(false);
 const soportesNegar = ref<File[]>([]);
 const soportesNegarInput = ref<HTMLInputElement | null>(null);
@@ -2309,6 +2410,27 @@ function tieneEvoluciones(solicitud: Solicitud): boolean {
   return contarEvoluciones(solicitud) > 0;
 }
 
+const respuestaDraft = ref<Record<number, string>>({});
+const respondiendoId = ref<number | null>(null);
+
+async function responderEvolucion(evolucionId: number): Promise<void> {
+  const sol = solicitudSeleccionada.value;
+  const mensaje = (respuestaDraft.value[evolucionId] ?? '').trim();
+  if (!sol || !mensaje || respondiendoId.value !== null) return;
+
+  try {
+    respondiendoId.value = evolucionId;
+    const { data } = await http.post(`/api/solicitudes-referencia/${sol.id}/evoluciones/${evolucionId}/responder`, { mensaje });
+    sol.evoluciones = (sol.evoluciones ?? []).map(e => (e.id === evolucionId ? { ...e, ...data.data } : e));
+    respuestaDraft.value[evolucionId] = '';
+    data.correo_enviado ? notify.success(data.message) : notify.warning(data.message);
+  } catch (e: any) {
+    notify.error(e.response?.data?.message || 'No se pudo enviar la respuesta');
+  } finally {
+    respondiendoId.value = null;
+  }
+}
+
 function verEvoluciones(solicitud: Solicitud): void {
   solicitudSeleccionada.value = solicitud;
   modalEvoluciones.value = true;
@@ -2346,33 +2468,31 @@ function manejarAccionFila(comando: string, s: Solicitud) {
   acciones[comando]?.(s);
 }
 
-/** Le pide por correo a la clínica la evolución actual del paciente (el correo lleva un enlace directo al módulo de Evolución). */
-async function solicitarEvolucion(s: Solicitud) {
-  let mensaje = '';
+/** Abre el formulario para pedirle por correo a la clínica la evolución actual del paciente (el correo lleva un enlace directo al módulo de Evolución). */
+function solicitarEvolucion(s: Solicitud) {
+  solicitudSeleccionada.value = s;
+  formEvolucion.value = { mensaje: '', correos_extra: [] };
+  modalSolicitarEvolucion.value = true;
+}
+
+async function enviarSolicitudEvolucion() {
+  const s = solicitudSeleccionada.value;
+  if (!s || enviandoEvolucion.value) return;
+
   try {
-    const respuesta = await ElMessageBox.prompt(
-      `Se enviará un correo a ${s.clinica?.nombre ?? s.institucion_remitente ?? 'la clínica'} pidiendo la evolución de ${nombreCompleto(s)}. Puedes agregar un mensaje opcional que irá en el correo:`,
-      'Solicitar evolución',
-      {
-        confirmButtonText: 'Enviar correo',
-        cancelButtonText: 'Cancelar',
-        type: 'info',
-        inputType: 'textarea',
-        inputPlaceholder: 'Mensaje para la clínica (opcional)',
-        inputValidator: (valor: string) => (valor ?? '').length <= 1000 || 'Máximo 1000 caracteres',
-      },
-    );
-    mensaje = respuesta.value?.trim() ?? '';
-  } catch {
-    return;
-  }
-  try {
-    const { data } = await http.post(`/api/solicitudes-referencia/${s.id}/solicitar-evolucion`, { mensaje: mensaje || null });
+    enviandoEvolucion.value = true;
+    const { data } = await http.post(`/api/solicitudes-referencia/${s.id}/solicitar-evolucion`, {
+      mensaje: formEvolucion.value.mensaje.trim() || null,
+      correos_extra: formEvolucion.value.correos_extra,
+    });
     notify.success(data.message || 'Solicitud de evolución enviada');
     const idx = solicitudes.value.findIndex(x => x.id === s.id);
     if (idx !== -1) solicitudes.value[idx] = { ...solicitudes.value[idx], ...data.data };
+    modalSolicitarEvolucion.value = false;
   } catch (e: any) {
     notify.error(e.response?.data?.message || 'No se pudo enviar la solicitud de evolución');
+  } finally {
+    enviandoEvolucion.value = false;
   }
 }
 
@@ -2518,7 +2638,7 @@ function abrirAceptar(s: Solicitud) {
     eps: EPS_LIST.includes(s.eps) ? s.eps : '',
     codigo_aceptacion: '',
     hora_llegada: '',
-    lugar_llegada: '',
+    lugar_llegada: s.lugar_llegada || '',
     observaciones_respuesta: '',
     correos_extra: [],
   };
@@ -2645,7 +2765,7 @@ function abrirCambiar(s: Solicitud) {
     sede: s.sede || '',
     codigo_aceptacion: '',
     hora_llegada: '',
-    lugar_llegada: '',
+    lugar_llegada: s.lugar_llegada || '',
     numero_ingreso: '',
     eps: EPS_LIST.includes(s.eps) ? s.eps : '',
     correos_extra: [],
@@ -2724,13 +2844,13 @@ const evolucionesPaciente = computed(() => {
     return sol.evoluciones
       .slice()
       .sort((a, b) => b.created_at.localeCompare(a.created_at))
-      .map(e => ({ id: e.id, texto: e.nota, created_at: e.created_at, adjuntos: e.adjuntos ?? [] }));
+      .map(e => ({ id: e.id, texto: e.nota, created_at: e.created_at, adjuntos: e.adjuntos ?? [], respuestas: e.respuestas ?? [], responder: true }));
   }
 
   return (sol.eventos ?? [])
     .filter(e => e.tipo === 'evolucion')
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .map(e => ({ id: e.id, texto: e.descripcion, created_at: e.created_at, adjuntos: [] as { id: number; nombre_original: string; mime_type: string; tamano: number }[] }));
+    .map(e => ({ id: e.id, texto: e.descripcion, created_at: e.created_at, adjuntos: [] as { id: number; nombre_original: string; mime_type: string; tamano: number }[], respuestas: [] as RespuestaEvolucion[], responder: false }));
 });
 
 /** Notas internas de seguimiento, de la más reciente a la más antigua. */
@@ -2778,8 +2898,8 @@ const agregarSoportesNegar = (event: Event) => agregarSoportes(soportesNegar, ev
 const agregarSoportesAceptar = (event: Event) => agregarSoportes(soportesAceptar, event);
 
 async function aceptar() {
-  if (!formAceptar.value.hora_respuesta || !formAceptar.value.nombre_quien_responde.trim() || !formAceptar.value.eps
-    || (!formAceptar.value.sin_disponibilidad && (!formAceptar.value.sede || !formAceptar.value.codigo_aceptacion.trim() || !formAceptar.value.hora_llegada || !formAceptar.value.lugar_llegada.trim()))) {
+  if (!formAceptar.value.hora_respuesta || !formAceptar.value.nombre_quien_responde.trim() || !formAceptar.value.eps || !formAceptar.value.lugar_llegada.trim()
+    || (!formAceptar.value.sin_disponibilidad && (!formAceptar.value.sede || !formAceptar.value.codigo_aceptacion.trim() || !formAceptar.value.hora_llegada))) {
     notify.warning('Complete los campos obligatorios');
     return;
   }
@@ -4811,6 +4931,22 @@ usePolling(() => {
 .evoluciones-modal-meta time { display: block; margin-top: 3px; color: #8292aa; font-size: .62rem; }
 .evoluciones-entry-tag { padding: 3px 7px; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-size: .54rem; font-weight: 850; white-space: nowrap; }
 .evoluciones-modal-entry p { margin: 9px 0 0; color: #334155; font-size: .76rem; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.evoluciones-respuesta { margin-top: 10px; padding: 9px 11px; border: 1px solid #bbf7d0; border-left: 3px solid #16a34a; border-radius: 10px; background: #f0fdf4; }
+.evoluciones-respuesta-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: #166534; font-size: .68rem; }
+.evoluciones-respuesta-head time { color: #64748b; }
+.evoluciones-respuesta-mail { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; padding: 1px 7px; border-radius: 999px; background: #dcfce7; color: #15803d; font-weight: 700; }
+.evoluciones-modal-entry .evoluciones-respuesta p { margin-top: 5px; color: #14532d; }
+.evoluciones-responder { display: flex; align-items: flex-end; gap: 8px; margin-top: 10px; padding-top: 9px; border-top: 1px dashed #c9ddf8; }
+.evoluciones-responder-input { flex: 1; min-width: 0; resize: vertical; padding: 7px 10px; border: 1px solid #bfdbfe; border-radius: 10px; background: #fff; color: #334155; font: inherit; font-size: .74rem; line-height: 1.5; outline: none; }
+.evoluciones-responder-input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+.evoluciones-responder-btn { display: inline-flex; flex-shrink: 0; align-items: center; gap: 5px; padding: 8px 14px; border: 0; border-radius: 10px; background: linear-gradient(135deg, #16a34a, #15803d); color: #fff; font-size: .72rem; font-weight: 700; cursor: pointer; box-shadow: 0 3px 8px rgba(22,163,74,.28); }
+.evoluciones-responder-btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
+.dark .evoluciones-respuesta { border-color: #166534; background: rgba(22,163,74,.12); }
+.dark .evoluciones-respuesta-head { color: #86efac; }
+.dark .evoluciones-respuesta-mail { background: rgba(22,163,74,.25); color: #86efac; }
+.dark .evoluciones-modal-entry .evoluciones-respuesta p { color: #dcfce7; }
+.dark .evoluciones-responder { border-top-color: #2c4a75; }
+.dark .evoluciones-responder-input { border-color: #2c4a75; background: #111a2b; color: #dbeafe; }
 .evoluciones-adjuntos { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; padding-top: 8px; border-top: 1px dashed #c9ddf8; }
 .evoluciones-adjunto {
   display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
