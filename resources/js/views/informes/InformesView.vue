@@ -119,20 +119,15 @@
               <span class="inf-ind-label">Ingresos efectivos</span>
               <span class="inf-ind-pill inf-ind-green">{{ informe.resumen.ingresos_efectivos }}</span>
             </li>
-            <li>
-              <span class="inf-ind-icon inf-ind-rose"><component :is="UserXIcon" class="w-3.5 h-3.5" /></span>
-              <span class="inf-ind-label">No ingresaron</span>
-              <span class="inf-ind-pill inf-ind-rose">{{ informe.resumen.negadas_no_ingreso }}</span>
+            <li title="Pacientes que no ingresaron (aceptados que no llegaron) más las solicitudes canceladas">
+              <span class="inf-ind-icon inf-ind-rose"><component :is="BanIcon" class="w-3.5 h-3.5" /></span>
+              <span class="inf-ind-label">Canceladas</span>
+              <span class="inf-ind-pill inf-ind-rose">{{ informe.resumen.negadas_no_ingreso + informe.resumen.canceladas }}</span>
             </li>
             <li>
               <span class="inf-ind-icon inf-ind-red"><component :is="XIcon" class="w-3.5 h-3.5" /></span>
               <span class="inf-ind-label">Negadas por decisión</span>
               <span class="inf-ind-pill inf-ind-red">{{ informe.resumen.negadas_decision }}</span>
-            </li>
-            <li>
-              <span class="inf-ind-icon inf-ind-gray"><component :is="BanIcon" class="w-3.5 h-3.5" /></span>
-              <span class="inf-ind-label">Canceladas</span>
-              <span class="inf-ind-pill inf-ind-gray">{{ informe.resumen.canceladas }}</span>
             </li>
           </ul>
         </section>

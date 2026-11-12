@@ -52,9 +52,9 @@
             <component :is="RefreshIcon" class="w-3.5 h-3.5" :class="{ 'animate-spin': cargando }" />
             Actualizar
           </button>
-          <button type="button" :disabled="!solicitudesFiltradas.length" @click="exportarExcel">
-            <component :is="DownloadIcon" class="w-3.5 h-3.5" />
-            Exportar CSV
+          <button type="button" :disabled="!solicitudesFiltradas.length || exportando" @click="exportarExcel">
+            <component :is="DownloadIcon" class="w-3.5 h-3.5" :class="{ 'animate-pulse': exportando }" />
+            {{ exportando ? 'Exportando…' : 'Exportar Excel' }}
           </button>
           <button type="button" :disabled="!solicitudesEnEspera.length || verificandoTodosIngresos" @click="verificarTodosIngresos">
             <component :is="SearchIcon" class="w-3.5 h-3.5" :class="{ 'animate-spin': verificandoTodosIngresos }" />
@@ -1441,6 +1441,7 @@ import {
   StickyNote as StickyNoteIcon,
 } from '@lucide/vue';
 import http from '@/plugins/axios';
+import { exportarSolicitudesExcel } from '@/lib/exportarSolicitudesExcel';
 import StatCard from '@/components/ui/StatCard.vue';
 import DateRangeFilter from '@/components/ui/DateRangeFilter.vue';
 import PanelHelp from '@/components/ui/PanelHelp.vue';
@@ -1937,27 +1938,19 @@ function cambiarTab(tab: 'todas' | 'pendiente' | 'pendiente_cama' | 'en_espera')
   paginaActual.value = 1;
 }
 
-function exportarExcel() {
+const exportando = ref(false);
+
+async function exportarExcel() {
   const rows = solicitudesFiltradas.value;
-  const headers = ['ID', 'Paciente', 'Documento', 'EPS', 'Clínica', 'Especialidad', 'Diagnóstico', 'Estado', 'Fecha', 'Hora', 'Remitente', 'Teléfono'];
-  const csv = [
-    headers.join('\t'),
-    ...rows.map(s => [
-      s.id, nombreCompleto(s), `${s.tipo_documento} ${s.numero_documento}`, s.eps,
-      s.clinica?.nombre ?? '', s.especialidad_requerida,
-      s.diagnosticos?.length ? s.diagnosticos.map(d => d.codigo_cie10).join('; ') : (s.diagnostico ?? ''),
-      estadoLabel(s.estado), formatFecha(s.fecha), s.hora,
-      s.quien_remitente ?? '', s.telefono_contacto ?? '',
-    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join('\t')),
-  ].join('\n');
-  const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `solicitudes_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-  notify.success(`Exportadas ${rows.length} solicitudes`);
+  try {
+    exportando.value = true;
+    await exportarSolicitudesExcel(rows.map(s => s.id), 'solicitudes');
+    notify.success(`Exportadas ${rows.length} solicitudes a Excel`);
+  } catch {
+    notify.error('No se pudo generar el Excel.');
+  } finally {
+    exportando.value = false;
+  }
 }
 
 function inicialesPaciente(s: Solicitud): string {

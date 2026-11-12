@@ -57,8 +57,8 @@
             <component :is="RefreshIcon" class="w-3.5 h-3.5" :class="{ 'animate-spin': cargando }" />
           </button>
         </el-tooltip>
-        <el-tooltip content="Exportar CSV" placement="top">
-          <button class="sol-icon-btn" :disabled="solicitudesFiltradas.length === 0" @click="exportarExcel">
+        <el-tooltip content="Exportar Excel" placement="top">
+          <button class="sol-icon-btn" :disabled="solicitudesFiltradas.length === 0 || exportando" @click="exportarExcel">
             <component :is="DownloadIcon" class="w-3.5 h-3.5" />
           </button>
         </el-tooltip>
@@ -702,6 +702,7 @@ import {
   StickyNote as StickyNoteIcon,
 } from '@lucide/vue';
 import http from '@/plugins/axios';
+import { exportarSolicitudesExcel } from '@/lib/exportarSolicitudesExcel';
 import { EPS_LIST } from '@/data/referencia';
 import { useAuthStore } from '@/stores/auth';
 import StatCard from '@/components/ui/StatCard.vue';
@@ -1041,29 +1042,21 @@ function cambiarTab(tab: 'todas' | 'completado' | 'negado' | 'cancelado') {
   paginaActual.value = 1;
 }
 
-function exportarExcel() {
+const exportando = ref(false);
+
+async function exportarExcel() {
   const rows = seleccionadas.value.size
     ? solicitudesFiltradas.value.filter(s => seleccionadas.value.has(s.id))
     : solicitudesFiltradas.value;
-  const headers = ['ID', 'Paciente', 'Documento', 'EPS', 'Clínica', 'Especialidad', 'Diagnóstico', 'Estado', 'Fecha', 'Hora', 'Remitente', 'Teléfono'];
-  const csv = [
-    headers.join('\t'),
-    ...rows.map(s => [
-      s.id, nombreCompleto(s), `${s.tipo_documento} ${s.numero_documento}`, s.eps,
-      s.clinica?.nombre ?? '', s.especialidad_requerida,
-      s.diagnosticos?.length ? s.diagnosticos.map(d => d.codigo_cie10).join('; ') : (s.diagnostico ?? ''),
-      estadoLabel(s.estado), formatFecha(s.fecha), s.hora,
-      s.quien_remitente ?? '', s.telefono_contacto ?? '',
-    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join('\t')),
-  ].join('\n');
-  const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `historico_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-  notify.success(`Exportadas ${rows.length} solicitudes`);
+  try {
+    exportando.value = true;
+    await exportarSolicitudesExcel(rows.map(s => s.id), 'historico');
+    notify.success(`Exportadas ${rows.length} solicitudes a Excel`);
+  } catch {
+    notify.error('No se pudo generar el Excel.');
+  } finally {
+    exportando.value = false;
+  }
 }
 
 function inicialesPaciente(s: Solicitud): string {

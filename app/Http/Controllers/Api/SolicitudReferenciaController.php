@@ -10,6 +10,7 @@ use App\Models\SolicitudReferenciaAdjunto;
 use App\Models\SolicitudReferenciaEvento;
 use App\Models\User;
 use App\Services\SqlQueryService;
+use App\Support\XlsxWriter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -755,6 +756,72 @@ class SolicitudReferenciaController extends Controller
         if ($rows) {
             Notification::insert($rows);
         }
+    }
+
+    /**
+     * Libro de Excel (.xlsx) con las solicitudes que la pantalla tiene
+     * filtradas: el front manda los ids visibles y acá se arma el archivo.
+     */
+    public function exportar(Request $request): BinaryFileResponse
+    {
+        $validated = $request->validate([
+            'ids' => ['required', 'array', 'min:1', 'max:20000'],
+            'ids.*' => ['integer'],
+            'nombre' => ['nullable', 'string', 'max:40'],
+        ]);
+
+        $estados = [
+            'pendiente' => 'Nueva solicitud',
+            'pendiente_cama' => 'Pendiente',
+            'en_espera' => 'Aceptado',
+            'completado' => 'Completada',
+            'negado' => 'Negada',
+            'cancelado' => 'Cancelada',
+        ];
+
+        $filas = [['ID', 'Paciente', 'Documento', 'Edad', 'EPS', 'Clínica', 'Especialidad', 'Diagnóstico', 'Servicio', 'Estado', 'Origen', 'Fecha', 'Hora', 'Remitente', 'Teléfono']];
+
+        SolicitudReferencia::query()
+            ->with(['clinica:id,nombre', 'diagnosticos'])
+            ->whereIn('id', $validated['ids'])
+            ->orderBy('fecha')
+            ->orderBy('hora')
+            ->chunk(500, function ($lote) use (&$filas, $estados): void {
+                foreach ($lote as $s) {
+                    $diagnostico = $s->diagnosticos->isNotEmpty()
+                        ? $s->diagnosticos->map(fn ($d): string => trim("{$d->codigo_cie10} {$d->descripcion}"))->implode('; ')
+                        : (string) $s->diagnostico;
+
+                    $filas[] = [
+                        $s->id,
+                        trim(preg_replace('/\s+/', ' ', "{$s->primer_nombre} {$s->segundo_nombre} {$s->primer_apellido} {$s->segundo_apellido}")),
+                        trim("{$s->tipo_documento} {$s->numero_documento}"),
+                        $s->edad,
+                        $s->eps,
+                        $s->clinica?->nombre ?? $s->institucion_remitente,
+                        $s->especialidad_requerida,
+                        $diagnostico,
+                        $s->servicio_remision ?: $s->servicio_ubicacion_actual,
+                        $estados[$s->estado] ?? $s->estado,
+                        $s->origen === 'correo' ? 'Correo' : 'Aplicativo',
+                        $s->fecha?->format('d/m/Y'),
+                        substr((string) $s->hora, 0, 5),
+                        $s->quien_remitente,
+                        $s->telefono_contacto,
+                    ];
+                }
+            });
+
+        $ruta = tempnam(sys_get_temp_dir(), 'solicitudes');
+        XlsxWriter::guardar($ruta, ['Solicitudes' => $filas]);
+
+        $nombre = preg_replace('/[^a-z0-9_-]/i', '', (string) ($validated['nombre'] ?? 'solicitudes')) ?: 'solicitudes';
+
+        return response()
+            ->download($ruta, "{$nombre}_".now()->toDateString().'.xlsx', [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            ])
+            ->deleteFileAfterSend();
     }
 
     public function descargarAdjunto(SolicitudReferencia $solicitud, SolicitudReferenciaAdjunto $adjunto): BinaryFileResponse

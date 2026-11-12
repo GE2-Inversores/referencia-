@@ -127,6 +127,7 @@ Route::prefix('api')->name('api.')->group(function (): void {
         Route::post('clinicas/{clinica}/reactivar', [ClinicaController::class, 'reactivar'])->name('clinicas.reactivar')->middleware('permission:clinicas.view');
 
         Route::get('solicitudes-referencia', [SolicitudReferenciaController::class, 'index'])->name('solicitudes-referencia.index')->middleware('permission:solicitudes.view');
+        Route::post('solicitudes-referencia/exportar', [SolicitudReferenciaController::class, 'exportar'])->name('solicitudes-referencia.exportar')->middleware('permission:solicitudes.view|historico.view');
         Route::get('solicitudes-referencia/historico', [SolicitudReferenciaController::class, 'historico'])->name('solicitudes-referencia.historico')->middleware('permission:historico.view');
         // El detalle también lo abre el dashboard (modal) y el historial.
         Route::get('solicitudes-referencia/{solicitud}', [SolicitudReferenciaController::class, 'show'])->name('solicitudes-referencia.show')->middleware('permission:solicitudes.view|historico.view|dashboard.view');
