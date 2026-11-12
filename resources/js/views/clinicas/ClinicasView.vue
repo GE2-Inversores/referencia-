@@ -367,7 +367,7 @@
           </div>
           <div class="accion-head-info">
             <p class="accion-head-title">Editar clínica</p>
-            <p class="accion-head-sub">{{ formEditar.nit }} · {{ formEditar.nombre }}</p>
+            <p class="accion-head-sub">{{ formEditar.nit || 'Sin NIT' }} · {{ formEditar.nombre }}</p>
           </div>
         </div>
       </template>
@@ -1654,7 +1654,6 @@ const formEditar = reactive({
   cedula_representante: '',
 });
 const rulesEditar: FormRules = {
-  nit: [{ required: true, message: 'Obligatorio', trigger: 'blur' }],
   nombre: [{ required: true, message: 'Obligatorio', trigger: 'blur' }],
   email: [{ required: true, message: 'Obligatorio', trigger: 'blur' }, { type: 'email', message: 'Correo inválido', trigger: 'blur' }],
 };
@@ -1970,7 +1969,7 @@ function exportarExcel() {
 function abrirEditar(clinica: Clinica) {
   Object.assign(formEditar, {
     id: clinica.id,
-    nit: clinica.nit,
+    nit: clinica.nit ?? '',
     nombre: clinica.nombre,
     email: clinica.email,
     telefono: clinica.telefono ?? '',
@@ -1990,7 +1989,7 @@ async function guardarEdicion() {
   try {
     procesandoEditar.value = true;
     await http.put(`/api/clinicas/${formEditar.id}`, {
-      nit: formEditar.nit,
+      nit: formEditar.nit?.trim() || null,
       nombre: formEditar.nombre,
       razon_social: formEditar.nombre,
       email: formEditar.email,

@@ -114,7 +114,7 @@ class ClinicaController extends Controller
         abort_unless($request->user()->hasPermission('clinicas.view'), Response::HTTP_FORBIDDEN);
 
         $validated = $request->validate([
-            'nit' => ['required', 'string', 'max:20', 'unique:clinicas,nit,'.$clinica->id],
+            'nit' => ['nullable', 'string', 'max:20', 'unique:clinicas,nit,'.$clinica->id],
             'nombre' => ['required', 'string', 'max:255'],
             'razon_social' => ['nullable', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255'],
