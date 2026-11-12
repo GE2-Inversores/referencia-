@@ -12,6 +12,22 @@ export const EPS_LIST = [
   'SURA EVENTO','SUSALUD EPS','UNIDAD PRESTADORA DE SALUD DEL VALLE DEL CAUCA',
 ];
 
+/**
+ * EPS que tienen más de un contrato (NUEVA EPS PGP / NUEVA EPS EVENTO…).
+ * Las clínicas externas eligen solo la EPS; el contrato lo define el personal
+ * de referencia al aceptar o negar, escogiendo la variante completa de EPS_LIST.
+ */
+export const EPS_CON_CONTRATO = ['ASMET SALUD', 'EMSSANAR', 'NUEVA EPS', 'SURA'];
+
+/** Nombre de la EPS sin el contrato: 'NUEVA EPS PGP' → 'NUEVA EPS'. */
+export function epsBase(eps: string | null | undefined): string {
+  const nombre = (eps ?? '').trim();
+  return EPS_CON_CONTRATO.find((base) => nombre === base || nombre.startsWith(`${base} `)) ?? nombre;
+}
+
+/** Lista para clínicas externas: cada EPS una sola vez, sin PGP / Evento. */
+export const EPS_LIST_EXTERNA = Array.from(new Set(EPS_LIST.map(epsBase)));
+
 export const ESPECIALIDADES = [
   'AYUDA DIAGNOSTICA','CARDIOLOGIA','CIRUGIA CARDIOVASCULAR','CIRUGIA DE CABEZA Y CUELLO',
   'CIRUGIA DE COLUMNA','CIRUGIA DE MANO','CIRUGIA DE MIEMBRO SUPERIOR','CIRUGIA DE PELVIS',

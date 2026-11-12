@@ -764,7 +764,7 @@
                 </div>
                 <div class="mb-1.5">
                   <label class="accion-field-label">EPS <span class="accion-required">*</span></label>
-                  <el-select v-model="formAceptar.eps" filterable placeholder="Seleccione la EPS" class="w-full" popper-class="negar-motivo-popper">
+                  <el-select v-model="formAceptar.eps" filterable placeholder="Seleccione la EPS con su contrato" class="w-full" popper-class="negar-motivo-popper">
                     <el-option v-for="e in EPS_LIST" :key="e" :label="e" :value="e" />
                   </el-select>
                 </div>
@@ -921,7 +921,7 @@
                 </div>
                 <div class="mb-2">
                   <label class="accion-field-label">EPS <span class="accion-required">*</span></label>
-                  <el-select v-model="formNegar.eps" filterable placeholder="Seleccione la EPS" class="w-full" popper-class="negar-motivo-popper">
+                  <el-select v-model="formNegar.eps" filterable placeholder="Seleccione la EPS con su contrato" class="w-full" popper-class="negar-motivo-popper">
                     <el-option v-for="e in EPS_LIST" :key="e" :label="e" :value="e" />
                   </el-select>
                 </div>
@@ -1059,7 +1059,7 @@
                 </div>
                 <div v-if="['en_espera', 'pendiente_cama', 'negado'].includes(formCambiar.estado)" class="mb-1.5">
                   <label class="accion-field-label">EPS <span class="accion-required">*</span></label>
-                  <el-select v-model="formCambiar.eps" filterable placeholder="Seleccione la EPS" class="w-full" popper-class="negar-motivo-popper">
+                  <el-select v-model="formCambiar.eps" filterable placeholder="Seleccione la EPS con su contrato" class="w-full" popper-class="negar-motivo-popper">
                     <el-option v-for="e in EPS_LIST" :key="e" :label="e" :value="e" />
                   </el-select>
                 </div>
@@ -2515,7 +2515,7 @@ function abrirAceptar(s: Solicitud) {
     nombre_quien_responde: authStore.user?.full_name ?? '',
     sin_disponibilidad: false,
     sede: s.sede || '',
-    eps: s.eps || '',
+    eps: EPS_LIST.includes(s.eps) ? s.eps : '',
     codigo_aceptacion: '',
     hora_llegada: '',
     lugar_llegada: '',
@@ -2647,7 +2647,7 @@ function abrirCambiar(s: Solicitud) {
     hora_llegada: '',
     lugar_llegada: '',
     numero_ingreso: '',
-    eps: s.eps || '',
+    eps: EPS_LIST.includes(s.eps) ? s.eps : '',
     correos_extra: [],
     grupo_negacion: '',
     motivo_negacion: '',
@@ -2748,7 +2748,7 @@ function abrirNegar(s: Solicitud) {
     hora_respuesta: horaActual(),
     grupo_negacion: '',
     motivo_negacion: '',
-    eps: s.eps || '',
+    eps: EPS_LIST.includes(s.eps) ? s.eps : '',
     nombre_quien_responde: authStore.user?.full_name ?? '',
     observaciones_respuesta: '',
     correos_extra: [],

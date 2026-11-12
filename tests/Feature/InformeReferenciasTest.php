@@ -88,6 +88,25 @@ class InformeReferenciasTest extends TestCase
         $this->assertSame(2, collect($respuesta->json('data.grupos_negacion'))->firstWhere('grupo', 'poblacion_objeto')['total']);
     }
 
+    public function test_no_red_card_groups_insurers_without_the_contract_type(): void
+    {
+        foreach (['ASMET SALUD PP', 'ASMET SALUD EVENTO', 'NUEVA EPS PGP', 'NUEVA EPS EVENTO', 'NUEVA EPS PGP', 'SOS'] as $eps) {
+            $this->solicitud('negado', atributos: ['eps' => $eps, 'grupo_negacion' => 'no_red', 'motivo_negacion' => 'Fuera de la red']);
+        }
+
+        $filas = collect(
+            $this->actingAs($this->staff())
+                ->getJson('/api/informes?desde=2026-11-01&hasta=2026-11-30')
+                ->assertOk()
+                ->json('data.no_red_por_eps')
+        )->pluck('total', 'nombre');
+
+        $this->assertSame(
+            ['NUEVA EPS' => 3, 'ASMET SALUD' => 2, 'SOS' => 1],
+            $filas->all(),
+        );
+    }
+
     public function test_report_breaks_down_by_eps_and_specialty(): void
     {
         $this->datosDePrueba();

@@ -58,7 +58,7 @@
             <div class="evo-avatar evo-avatar-lg">{{ inicialesPaciente(sol) }}</div>
             <div class="evo-pt-id">
               <h2>{{ nombrePaciente(sol) }}</h2>
-              <p>{{ sol.tipo_documento }} {{ sol.numero_documento }} · {{ sol.eps || '—' }}</p>
+              <p>{{ sol.tipo_documento }} {{ sol.numero_documento }} · {{ epsBase(sol.eps) || '—' }}</p>
             </div>
             <div class="evo-pt-chips">
               <span class="evo-id-chip">{{ formatId(sol.id) }}</span>
@@ -79,7 +79,7 @@
                 <div class="evo-info-rows">
                   <div class="evo-info-row"><span>Documento</span><strong>{{ sol.tipo_documento }} {{ sol.numero_documento }}</strong></div>
                   <div class="evo-info-row"><span>Edad / Género</span><strong>{{ sol.edad ? `${sol.edad} años` : '—' }} · {{ sol.genero === 'F' ? 'Femenino' : sol.genero === 'M' ? 'Masculino' : '—' }}</strong></div>
-                  <div class="evo-info-row"><span>EPS</span><strong>{{ sol.eps || '—' }}</strong></div>
+                  <div class="evo-info-row"><span>EPS</span><strong>{{ epsBase(sol.eps) || '—' }}</strong></div>
                   <div class="evo-info-row"><span>Municipio</span><strong>{{ sol.municipio_capita || '—' }}</strong></div>
                   <div class="evo-info-row"><span>Especialidad</span><strong>{{ sol.especialidad_requerida || '—' }}</strong></div>
                   <div class="evo-info-row"><span>Servicio actual</span><strong>{{ sol.servicio_ubicacion_actual || '—' }}</strong></div>
@@ -236,6 +236,7 @@ import { useRoute } from 'vue-router';
 import { ElInput } from 'element-plus';
 import http from '@/plugins/axios';
 import notify from '@/plugins/toast';
+import { epsBase } from '@/data/referencia';
 import { useClinicaAuthStore } from '@/stores/clinicaAuth';
 
 interface Evolucion {

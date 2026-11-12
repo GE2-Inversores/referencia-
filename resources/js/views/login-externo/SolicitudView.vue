@@ -85,7 +85,7 @@
             </el-form-item>
             <el-form-item label="EPS / Aseguradora" prop="eps" required :class="['rf-field rf-col-2 rf-stagger-5', { 'is-success': camposValidos.eps }]">
               <el-select v-model="form.eps" filterable class="w-full" placeholder="Seleccione o escriba" popper-class="rf-select-popper">
-                <el-option v-for="e in EPS_LIST" :key="e" :label="e" :value="e" />
+                <el-option v-for="e in EPS_LIST_EXTERNA" :key="e" :label="e" :value="e" />
               </el-select>
             </el-form-item>
             <el-form-item label="Edad" prop="edad" required :class="['rf-field rf-col-quarter rf-stagger-6', { 'is-success': camposValidos.edad }]">
@@ -679,7 +679,7 @@ import {
   Mail as MailIcon,
 } from '@lucide/vue';
 import http from '@/plugins/axios';
-import { TIPOS_DOCUMENTO, EPS_LIST, ESPECIALIDADES, SERVICIOS } from '@/data/referencia';
+import { TIPOS_DOCUMENTO, EPS_LIST_EXTERNA, ESPECIALIDADES, SERVICIOS } from '@/data/referencia';
 
 const router = useRouter();
 const guardando = ref(false);

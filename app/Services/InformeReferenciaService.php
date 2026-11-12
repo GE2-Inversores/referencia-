@@ -75,7 +75,7 @@ class InformeReferenciaService
             'motivos_no_ingreso' => $this->motivosNoIngreso($noIngreso),
             'no_red_por_eps' => $this->conteo(
                 $negadasDecision->reject(fn (SolicitudReferencia $s): bool => $s->grupo_negacion === 'poblacion_objeto'),
-                fn (SolicitudReferencia $s): string => $s->eps ?: 'Sin EPS'
+                fn (SolicitudReferencia $s): string => SolicitudReferencia::epsBase($s->eps) ?: 'Sin EPS'
             ),
             'motivos_poblacion' => $this->motivosCatalogo($negadasDecision->where('grupo_negacion', 'poblacion_objeto'), self::MOTIVOS_POBLACION_CATALOGO, 'motivo_negacion'),
             'motivos_no_red' => $this->motivosCatalogo($negadasDecision->where('grupo_negacion', 'no_red'), [], 'motivo_negacion'),

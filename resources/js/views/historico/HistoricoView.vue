@@ -549,7 +549,7 @@
                 </div>
                 <div v-if="['en_espera', 'pendiente_cama', 'negado'].includes(formCambiar.estado)" class="mb-1.5">
                   <label class="accion-field-label">EPS <span class="accion-required">*</span></label>
-                  <el-select v-model="formCambiar.eps" filterable placeholder="Seleccione la EPS" class="w-full" popper-class="negar-motivo-popper">
+                  <el-select v-model="formCambiar.eps" filterable placeholder="Seleccione la EPS con su contrato" class="w-full" popper-class="negar-motivo-popper">
                     <el-option v-for="e in EPS_LIST" :key="e" :label="e" :value="e" />
                   </el-select>
                 </div>
@@ -1444,7 +1444,7 @@ function abrirCambiar(s: Solicitud) {
     hora_llegada: '',
     lugar_llegada: '',
     numero_ingreso: '',
-    eps: s.eps || '',
+    eps: EPS_LIST.includes(s.eps) ? s.eps : '',
     grupo_negacion: '',
     motivo_negacion: '',
   };

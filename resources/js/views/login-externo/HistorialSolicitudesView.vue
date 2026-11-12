@@ -73,7 +73,7 @@
         <label class="filter-label">EPS</label>
         <select v-model="filtroEps" class="filter-select">
           <option value="">Todas</option>
-          <option v-for="e in EPS_LIST" :key="e" :value="e">{{ e }}</option>
+          <option v-for="e in EPS_LIST_EXTERNA" :key="e" :value="e">{{ e }}</option>
         </select>
       </div>
       <div class="shrink-0">
@@ -156,7 +156,7 @@
               </td>
               <td class="px-4 py-3 hidden sm:table-cell text-xs" :style="{ color: isDark ? '#cbd5e1' : '#475569' }">{{ sol.especialidad_requerida }}</td>
               <td class="px-4 py-3 hidden md:table-cell">
-                <span class="text-[10px] font-semibold px-2 py-0.5 rounded-md" :style="{ background: isDark ? '#1e293b' : '#f1f5f9', color: isDark ? '#cbd5e1' : '#475569' }">{{ sol.eps }}</span>
+                <span class="text-[10px] font-semibold px-2 py-0.5 rounded-md" :style="{ background: isDark ? '#1e293b' : '#f1f5f9', color: isDark ? '#cbd5e1' : '#475569' }">{{ epsBase(sol.eps) }}</span>
               </td>
               <td class="px-4 py-3 hidden lg:table-cell">
                 <div class="fecha-cell">
@@ -226,7 +226,7 @@
           </div>
           <div class="flex items-center gap-3 text-[10px]" :style="{ color: isDark ? '#94a3b8' : '#64748b' }">
             <span>{{ sol.especialidad_requerida }}</span>
-            <span class="font-semibold px-1.5 py-0.5 rounded" :style="{ background: isDark ? '#1e293b' : '#f1f5f9' }">{{ sol.eps }}</span>
+            <span class="font-semibold px-1.5 py-0.5 rounded" :style="{ background: isDark ? '#1e293b' : '#f1f5f9' }">{{ epsBase(sol.eps) }}</span>
             <span class="ml-auto">{{ formatFecha(sol.created_at) }}</span>
           </div>
         </div>
@@ -279,7 +279,7 @@
                   <div class="data-row"><span>Nombre</span><strong>{{ solicitudSeleccionada.primer_nombre }} {{ solicitudSeleccionada.segundo_nombre }} {{ solicitudSeleccionada.primer_apellido }} {{ solicitudSeleccionada.segundo_apellido }}</strong></div>
                   <div class="data-row"><span>Documento</span><strong>{{ solicitudSeleccionada.tipo_documento }} {{ solicitudSeleccionada.numero_documento }}</strong></div>
                   <div class="data-row"><span>Edad / Género</span><strong>{{ solicitudSeleccionada.edad }} años · {{ solicitudSeleccionada.genero === 'M' ? 'Masc.' : 'Fem.' }}</strong></div>
-                  <div class="data-row"><span>EPS</span><strong>{{ solicitudSeleccionada.eps }}</strong></div>
+                  <div class="data-row"><span>EPS</span><strong>{{ epsBase(solicitudSeleccionada.eps) }}</strong></div>
                 </div>
               </div>
               <div class="detalle-card">
@@ -455,7 +455,7 @@ import {
   Loader2 as Loader2Icon,
 } from '@lucide/vue';
 import http from '@/plugins/axios';
-import { ESPECIALIDADES, EPS_LIST } from '@/data/referencia';
+import { ESPECIALIDADES, EPS_LIST_EXTERNA, epsBase } from '@/data/referencia';
 import StatCard from '@/components/ui/StatCard.vue';
 import { useClinicaLayoutStore } from '@/stores/clinicaLayout';
 
@@ -544,7 +544,7 @@ const solicitudesFiltradas = computed(() => {
   }
 
   if (filtroEps.value) {
-    lista = lista.filter(s => s.eps === filtroEps.value);
+    lista = lista.filter(s => epsBase(s.eps) === filtroEps.value);
   }
 
   if (filtroDesde.value) {

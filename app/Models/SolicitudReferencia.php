@@ -11,6 +11,31 @@ class SolicitudReferencia extends Model
 {
     use SoftDeletes;
 
+    /**
+     * EPS que manejan más de un contrato: al aceptar o negar, el personal de
+     * referencia debe elegir la variante completa (p. ej. NUEVA EPS PGP).
+     *
+     * @var array<int, string>
+     */
+    public const EPS_CON_CONTRATO = ['ASMET SALUD', 'EMSSANAR', 'NUEVA EPS', 'SURA'];
+
+    /**
+     * Nombre de la EPS sin el tipo de contrato: "NUEVA EPS PGP" → "NUEVA EPS".
+     */
+    public static function epsBase(?string $eps): string
+    {
+        $nombre = trim((string) $eps);
+        $mayusculas = mb_strtoupper($nombre);
+
+        foreach (self::EPS_CON_CONTRATO as $base) {
+            if ($mayusculas === $base || str_starts_with($mayusculas, $base.' ')) {
+                return $base;
+            }
+        }
+
+        return $nombre;
+    }
+
     protected $table = 'solicitudes_referencia';
 
     protected $attributes = [

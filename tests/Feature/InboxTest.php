@@ -160,6 +160,57 @@ class InboxTest extends TestCase
             ->assertJsonFragment(['nombre' => 'Urgentes', 'total' => 1]);
     }
 
+    public function test_negar_exige_la_eps_con_su_tipo_de_contrato(): void
+    {
+        $staff = $this->staff();
+        $correo = $this->correo();
+        $this->actingAs($staff)->postJson("/api/inbox/{$correo->id}/solicitud", $this->datosSolicitud())->assertOk();
+        $solicitud = SolicitudReferencia::where('inbox_mensaje_id', $correo->id)->firstOrFail();
+
+        $datos = [
+            'hora_respuesta' => '10:30',
+            'grupo_negacion' => 'no_red',
+            'motivo_negacion' => 'Paciente fuera de la red',
+            'nombre_quien_responde' => 'Super Administrador',
+        ];
+
+        foreach (['NUEVA EPS', 'asmet salud', 'EMSSANAR', 'SURA'] as $sinContrato) {
+            $this->actingAs($staff)
+                ->postJson("/api/solicitudes-referencia/{$solicitud->id}/negar", $datos + ['eps' => $sinContrato])
+                ->assertStatus(422)
+                ->assertJsonPath('data.errors.eps.0', 'Seleccione la EPS con su tipo de contrato (por ejemplo NUEVA EPS PGP o NUEVA EPS EVENTO).');
+        }
+
+        $this->actingAs($staff)
+            ->postJson("/api/solicitudes-referencia/{$solicitud->id}/negar", $datos + ['eps' => 'NUEVA EPS PGP'])
+            ->assertOk();
+
+        $this->assertSame('NUEVA EPS PGP', $solicitud->fresh()->eps);
+    }
+
+    public function test_aceptar_exige_la_eps_con_su_tipo_de_contrato(): void
+    {
+        $staff = $this->staff();
+        $correo = $this->correo();
+        $this->actingAs($staff)->postJson("/api/inbox/{$correo->id}/solicitud", $this->datosSolicitud())->assertOk();
+        $solicitud = SolicitudReferencia::where('inbox_mensaje_id', $correo->id)->firstOrFail();
+
+        $datos = [
+            'sin_disponibilidad' => true,
+            'hora_respuesta' => '10:30',
+            'nombre_quien_responde' => 'Super Administrador',
+        ];
+
+        $this->actingAs($staff)
+            ->postJson("/api/solicitudes-referencia/{$solicitud->id}/aceptar", $datos + ['eps' => 'NUEVA EPS'])
+            ->assertStatus(422)
+            ->assertJsonPath('data.errors.eps.0', 'Seleccione la EPS con su tipo de contrato (por ejemplo NUEVA EPS PGP o NUEVA EPS EVENTO).');
+
+        $this->actingAs($staff)
+            ->postJson("/api/solicitudes-referencia/{$solicitud->id}/aceptar", $datos + ['eps' => 'NUEVA EPS EVENTO'])
+            ->assertOk();
+    }
+
     public function test_mueve_de_carpeta_un_correo_gestionado_pero_no_uno_pendiente(): void
     {
         $staff = $this->staff();

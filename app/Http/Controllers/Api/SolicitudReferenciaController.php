@@ -11,6 +11,7 @@ use App\Models\SolicitudReferenciaEvento;
 use App\Models\User;
 use App\Services\SqlQueryService;
 use App\Support\XlsxWriter;
+use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -82,7 +83,7 @@ class SolicitudReferenciaController extends Controller
             'sede' => ['nullable', Rule::requiredIf(fn () => ! $sinDisponibilidad), Rule::in(['URGENCIAS', 'CENTRAL DE ESPECIALISTAS', 'CAC SANTA BARBARA'])],
             // EPS confirmada al momento de la respuesta — el operador la
             // valida/corrige y queda guardada en la solicitud.
-            'eps' => ['required', 'string', 'max:120'],
+            'eps' => ['required', 'string', 'max:120', $this->epsConContrato()],
             'observaciones_respuesta' => ['nullable', 'string'],
             'soportes' => ['nullable', 'array', 'max:5'],
             'soportes.*' => ['file', 'mimes:pdf,jpg,jpeg,png,gif,webp,bmp,tiff,svg,doc,docx,xls,xlsx,ppt,pptx,txt,csv,zip,rar', 'max:10240'],
@@ -248,7 +249,7 @@ class SolicitudReferenciaController extends Controller
             'hora_respuesta' => ['required', 'date_format:H:i'],
             'grupo_negacion' => ['required', 'string', 'in:no_red,poblacion_objeto'],
             'motivo_negacion' => ['required', 'string', 'max:250'],
-            'eps' => ['required', 'string', 'max:120'],
+            'eps' => ['required', 'string', 'max:120', $this->epsConContrato()],
             'nombre_quien_responde' => ['required', 'string', 'max:200'],
             'observaciones_respuesta' => ['nullable', 'string'],
             'soportes' => ['nullable', 'array', 'max:5'],
@@ -330,7 +331,7 @@ class SolicitudReferenciaController extends Controller
             'sede' => ['nullable', Rule::requiredIf(fn () => $request->input('estado') === 'en_espera' && ! $solicitud->sede), Rule::in(['URGENCIAS', 'CENTRAL DE ESPECIALISTAS', 'CAC SANTA BARBARA'])],
             // EPS confirmada al decidir — se exige al dejarla pendiente
             // (espera/cupo) o al negarla; al completar se conserva la que hay.
-            'eps' => ['nullable', Rule::requiredIf(fn () => in_array($request->input('estado'), ['en_espera', 'pendiente_cama', 'negado'], true)), 'string', 'max:120'],
+            'eps' => ['nullable', Rule::requiredIf(fn () => in_array($request->input('estado'), ['en_espera', 'pendiente_cama', 'negado'], true)), 'string', 'max:120', $this->epsConContrato()],
             'numero_ingreso' => ['nullable', Rule::requiredIf(fn () => $request->input('estado') === 'completado'), 'integer'],
             'grupo_negacion' => ['nullable', Rule::requiredIf(fn () => $request->input('estado') === 'negado'), Rule::in(['no_red', 'poblacion_objeto'])],
             'motivo_negacion' => ['nullable', Rule::requiredIf(fn () => $request->input('estado') === 'negado'), 'string', 'max:250'],
@@ -704,6 +705,19 @@ class SolicitudReferenciaController extends Controller
             $solicitud->correoNotificacion(),
             ...$correosExtra,
         ])));
+    }
+
+    /**
+     * La EPS elegida al aceptar o negar debe traer su contrato: "NUEVA EPS"
+     * a secas no sirve, tiene que ser "NUEVA EPS PGP" o "NUEVA EPS EVENTO".
+     */
+    private function epsConContrato(): Closure
+    {
+        return function (string $atributo, mixed $valor, Closure $fail): void {
+            if (in_array(mb_strtoupper(trim((string) $valor)), SolicitudReferencia::EPS_CON_CONTRATO, true)) {
+                $fail('Seleccione la EPS con su tipo de contrato (por ejemplo NUEVA EPS PGP o NUEVA EPS EVENTO).');
+            }
+        };
     }
 
     /**
