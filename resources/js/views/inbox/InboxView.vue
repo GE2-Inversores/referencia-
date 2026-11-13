@@ -33,7 +33,7 @@
       </header>
 
       <p v-if="!panelNegar && !panelAceptar && gmail.ultimo_error" class="inbx-alerta">Error de sincronización: {{ gmail.ultimo_error }}</p>
-      <p v-else-if="!panelNegar && !panelAceptar && !gmail.configurado" class="inbx-alerta">
+      <p v-else-if="!panelNegar && !panelAceptar && gmailCargado && !gmail.configurado" class="inbx-alerta">
         El buzón aún no está configurado — define el correo y sus credenciales en Configuración → Correo.
       </p>
       <p v-else-if="!panelNegar && !panelAceptar && gmail.ultima_sync" class="inbx-sync-info">Última sincronización: {{ fechaLarga(gmail.ultima_sync) }}</p>
@@ -664,6 +664,7 @@ const sincronizando = ref(false);
 const noLeidos = ref(0);
 const meta = ref({ total: 0, pagina: 1, paginas: 1 });
 const gmail = ref<GmailInfo>({ configurado: false, buzon: null, ultima_sync: null, ultimo_error: null });
+const gmailCargado = ref(false);
 
 async function cargar(reiniciar = false): Promise<void> {
   cargando.value = true;
@@ -682,6 +683,7 @@ async function cargar(reiniciar = false): Promise<void> {
     noLeidos.value = data.meta.no_leidos;
     carpetas.value = data.meta.carpetas ?? carpetas.value;
     gmail.value = data.gmail;
+    gmailCargado.value = true;
   } catch {
     notify.error('No se pudo cargar la bandeja.');
   } finally {
@@ -810,6 +812,7 @@ async function refrescar(): Promise<void> {
     noLeidos.value = data.meta.no_leidos;
     carpetas.value = data.meta.carpetas ?? carpetas.value;
     gmail.value = data.gmail;
+    gmailCargado.value = true;
     meta.value.total = data.meta.total;
     meta.value.paginas = data.meta.paginas;
 
