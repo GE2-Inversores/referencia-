@@ -70,10 +70,14 @@ Route::prefix('api')->name('api.')->group(function (): void {
         Route::get('inbox', [InboxController::class, 'index'])->name('inbox.index')->middleware('permission:inbox.view');
         Route::get('inbox/no-leidos', [InboxController::class, 'noLeidos'])->name('inbox.no-leidos')->middleware('permission:inbox.view');
         Route::post('inbox/sincronizar', [InboxController::class, 'sincronizar'])->name('inbox.sincronizar')->middleware('permission:inbox.view');
+        Route::get('inbox/verificar-documento', [InboxController::class, 'verificarDocumento'])->name('inbox.verificar-documento')->middleware('permission:inbox.view|solicitudes.view');
         Route::get('inbox/{mensaje}', [InboxController::class, 'show'])->name('inbox.show')->whereNumber('mensaje')->middleware('permission:inbox.view');
         Route::post('inbox/{mensaje}/solicitud', [InboxController::class, 'crearSolicitud'])->name('inbox.solicitud')->whereNumber('mensaje')->middleware('permission:inbox.view|solicitudes.view');
         Route::post('inbox/{mensaje}/carpeta', [InboxController::class, 'moverCarpeta'])->name('inbox.carpeta')->whereNumber('mensaje')->middleware('permission:inbox.view|solicitudes.view');
         Route::post('inbox/{mensaje}/negar', [InboxController::class, 'negar'])->name('inbox.negar')->whereNumber('mensaje')->middleware('permission:inbox.view|solicitudes.view');
+        Route::post('inbox/{mensaje}/reenviar', [InboxController::class, 'reenviar'])->name('inbox.reenviar')->whereNumber('mensaje')->middleware('permission:inbox.view');
+        Route::get('inbox/correos-clinicas', [InboxController::class, 'correosClinicas'])->name('inbox.correos-clinicas')->middleware('permission:inbox.view');
+        Route::post('inbox/{mensaje}/papelera', [InboxController::class, 'papelera'])->name('inbox.papelera')->whereNumber('mensaje')->middleware('permission:inbox.view');
 
         Route::get('user', CurrentUserController::class)->name('user');
         Route::put('user/profile', [CurrentUserController::class, 'updateProfile'])->name('user.profile.update');

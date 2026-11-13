@@ -132,7 +132,7 @@ onMounted(() => {
 
 usePolling(() => {
   notifications.fetchUnreadCount();
-}, 60000);
+}, 30000);
 
 function onOpen() {
   notifications.fetchNotifications({ force: true });

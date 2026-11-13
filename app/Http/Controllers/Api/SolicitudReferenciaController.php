@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Mail\RespuestaEvolucionClinica;
 use App\Mail\SolicitudEvolucionClinica;
+use App\Models\InboxMensaje;
 use App\Models\Notification;
 use App\Models\SolicitudEvolucion;
 use App\Models\SolicitudReferencia;
@@ -131,6 +132,8 @@ class SolicitudReferenciaController extends Controller
                 );
             }
 
+            $this->sincronizarCarpetaCorreo($solicitud, 'radicada');
+
             $this->notificarClinica(
                 $solicitud,
                 'Solicitud aceptada',
@@ -174,6 +177,8 @@ class SolicitudReferenciaController extends Controller
                 }
             );
         }
+
+        $this->sincronizarCarpetaCorreo($solicitud, 'radicada');
 
         $this->notificarClinica(
             $solicitud,
@@ -347,6 +352,10 @@ class SolicitudReferenciaController extends Controller
 
         $this->guardarSoportes($solicitud, $validated['soportes'] ?? []);
 
+        $grupos = ['no_red' => 'Paciente no RED', 'poblacion_objeto' => 'Población objeto'];
+        $detalleNegacion = "EPS: {$validated['eps']} · Grupo: {$grupos[$validated['grupo_negacion']]} · Motivo: {$validated['motivo_negacion']}";
+        $this->sincronizarCarpetaCorreo($solicitud, 'negada', $detalleNegacion);
+
         $solicitud->load('clinica');
 
         if ($destinatarios !== []) {
@@ -432,6 +441,17 @@ class SolicitudReferenciaController extends Controller
         ]);
 
         $solicitud->load('clinica');
+
+        // El correo de origen sigue la decisión tomada aquí: las negadas van
+        // a Negados y las que siguen vigentes (o completadas) a Gestionados.
+        if ($validated['estado'] === 'negado') {
+            $grupos = ['no_red' => 'Paciente no RED', 'poblacion_objeto' => 'Población objeto'];
+            $motivo = $solicitud->motivo_negacion ?? $validated['motivo'];
+            $detalle = "EPS: {$solicitud->eps} · Grupo: {$grupos[$solicitud->grupo_negacion ?? 'no_red']} · Motivo: {$motivo}";
+            $this->sincronizarCarpetaCorreo($solicitud, 'negada', $detalle);
+        } elseif ($validated['estado'] !== 'cancelado') {
+            $this->sincronizarCarpetaCorreo($solicitud, 'radicada');
+        }
 
         SolicitudReferenciaEvento::create([
             'solicitud_referencia_id' => $solicitud->id,
@@ -792,6 +812,31 @@ class SolicitudReferenciaController extends Controller
                 $fail('Seleccione la EPS con su tipo de contrato (por ejemplo NUEVA EPS PGP o NUEVA EPS EVENTO).');
             }
         };
+    }
+
+    /**
+     * Si la solicitud nació de un correo de la bandeja, ese correo sigue la
+     * decisión: las negadas van a la carpeta Negados y las radicadas a
+     * Gestionados, así se gestione desde el módulo de Solicitudes.
+     */
+    private function sincronizarCarpetaCorreo(SolicitudReferencia $solicitud, string $gestion, ?string $detalle = null): void
+    {
+        if (! $solicitud->inbox_mensaje_id) {
+            return;
+        }
+
+        $mensaje = InboxMensaje::find($solicitud->inbox_mensaje_id);
+        if (! $mensaje) {
+            return;
+        }
+
+        $mensaje->update([
+            'gestion' => $gestion,
+            'gestion_por' => $solicitud->nombre_quien_responde,
+            'gestion_at' => now(),
+            'gestion_detalle' => $detalle ?? $mensaje->gestion_detalle,
+            'carpeta' => $gestion === 'negada' ? 'Negados' : 'Gestionados',
+        ]);
     }
 
     /**

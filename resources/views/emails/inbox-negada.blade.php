@@ -43,6 +43,9 @@
                   <td style="padding:18px 24px;">
                     <p style="margin:0 0 6px;font-size:11px;font-weight:bold;color:#b91c1c;text-transform:uppercase;letter-spacing:1px;">Motivo</p>
                     <p style="margin:0;font-size:14px;color:#7f1d1d;line-height:1.6;">{{ $motivo }}</p>
+                    @if(filled($eps ?? null))
+                    <p style="margin:10px 0 0;font-size:12px;color:#991b1b;"><strong>Aseguradora:</strong> {{ $eps }}</p>
+                    @endif
                   </td>
                 </tr>
               </table>

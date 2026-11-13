@@ -3,12 +3,14 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Clinica;
 use App\Models\InboxMensaje;
 use App\Models\Notification;
 use App\Models\SolicitudReferencia;
 use App\Models\SolicitudReferenciaEvento;
 use App\Models\User;
 use App\Services\GmailService;
+use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -23,7 +25,14 @@ class InboxController extends Controller
 {
     public function index(Request $request, GmailService $gmail): JsonResponse
     {
+        // Solo las columnas que muestra la lista: el cuerpo y los adjuntos se
+        // cargan aparte al abrir el correo (ver show()).
         $consulta = InboxMensaje::query()
+            ->select([
+                'id', 'gmail_id', 'remitente', 'remitente_email', 'para', 'asunto', 'snippet',
+                'tiene_adjuntos', 'recibido_en', 'leido',
+                'gestion', 'gestion_por', 'gestion_at', 'gestion_detalle', 'carpeta',
+            ])
             ->with(['solicitud:id,inbox_mensaje_id,estado,nombre_quien_responde,created_at'])
             ->latest('recibido_en');
 
@@ -40,10 +49,14 @@ class InboxController extends Controller
             $consulta->where('leido', false);
         }
 
-        if ($request->filled('carpeta')) {
-            $request->input('carpeta') === 'entrada'
-                ? $consulta->whereNull('carpeta')
-                : $consulta->where('carpeta', $request->string('carpeta'));
+        // La vista por defecto es Entrada: correos sin carpeta. Al gestionar
+        // (radicar/negar/reenviar) el correo toma carpeta y sale de la lista
+        // — solo se vuelve a ver dentro de esa carpeta.
+        $carpeta = (string) $request->input('carpeta', 'entrada');
+        if ($carpeta === 'entrada') {
+            $consulta->whereNull('carpeta');
+        } else {
+            $consulta->where('carpeta', $carpeta);
         }
 
         $pagina = $consulta->paginate(30);
@@ -54,7 +67,7 @@ class InboxController extends Controller
                 'total' => $pagina->total(),
                 'pagina' => $pagina->currentPage(),
                 'paginas' => $pagina->lastPage(),
-                'no_leidos' => InboxMensaje::where('leido', false)->count(),
+                'no_leidos' => InboxMensaje::where('leido', false)->whereNull('carpeta')->count(),
                 'carpetas' => $this->carpetas(),
             ],
             'gmail' => [
@@ -79,8 +92,8 @@ class InboxController extends Controller
             ->groupBy('carpeta')
             ->pluck('total', 'carpeta');
 
-        return collect(['Aceptaciones', 'Negaciones'])
-            ->merge($conteos->keys())
+        return collect(['Gestionados', 'Negados'])
+            ->merge($conteos->keys()->diff(['Gestionados', 'Negados', 'Aceptaciones', 'Negaciones', 'Reenviados', 'Papelera']))
             ->unique()
             ->map(fn (string $nombre): array => ['nombre' => $nombre, 'total' => (int) ($conteos[$nombre] ?? 0)])
             ->values()
@@ -92,6 +105,23 @@ class InboxController extends Controller
         $nombre = trim((string) $request->input('carpeta'));
 
         return $nombre !== '' ? mb_substr($nombre, 0, 60) : $defecto;
+    }
+
+    /**
+     * Elimina el correo definitivamente del aplicativo. El UID queda
+     * registrado para que la sincronización no lo vuelva a traer desde
+     * Gmail — el correo en sí sigue existiendo en el buzón.
+     */
+    public function papelera(InboxMensaje $mensaje, GmailService $gmail): JsonResponse
+    {
+        $gmail->registrarEliminado((string) $mensaje->gmail_id);
+        $mensaje->delete();
+
+        return response()->json([
+            'data' => null,
+            'carpetas' => $this->carpetas(),
+            'message' => 'Correo eliminado definitivamente.',
+        ]);
     }
 
     /**
@@ -127,7 +157,38 @@ class InboxController extends Controller
 
     public function noLeidos(): JsonResponse
     {
-        return response()->json(['no_leidos' => InboxMensaje::where('leido', false)->count()]);
+        return response()->json(['no_leidos' => InboxMensaje::where('leido', false)->whereNull('carpeta')->count()]);
+    }
+
+    /**
+     * Aviso de posible duplicado al radicar un correo: busca solicitudes
+     * activas con el mismo documento del paciente — la clínica a veces remite
+     * el mismo caso por el portal y por correo. Es solo un aviso: el personal
+     * decide si radica igual.
+     */
+    public function verificarDocumento(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'numero_documento' => ['required', 'string', 'max:30'],
+            'tipo_documento' => ['nullable', 'string', 'max:5'],
+        ]);
+
+        $duplicadas = SolicitudReferencia::with('clinica:id,nombre')
+            ->where('numero_documento', trim($validated['numero_documento']))
+            ->when($validated['tipo_documento'] ?? null, fn ($q, string $tipo) => $q->where('tipo_documento', $tipo))
+            ->whereIn('estado', ['pendiente', 'pendiente_cama', 'en_espera'])
+            ->latest()
+            ->limit(5)
+            ->get(['id', 'clinica_id', 'primer_nombre', 'primer_apellido', 'estado', 'created_at'])
+            ->map(fn (SolicitudReferencia $s): array => [
+                'id' => $s->id,
+                'paciente' => trim("{$s->primer_nombre} {$s->primer_apellido}"),
+                'clinica' => $s->clinica?->nombre,
+                'estado' => $s->estado,
+                'creada' => $s->created_at?->toDateTimeString(),
+            ]);
+
+        return response()->json(['duplicadas' => $duplicadas]);
     }
 
     /**
@@ -150,7 +211,7 @@ class InboxController extends Controller
             'genero' => ['required', Rule::in(['M', 'F'])],
             'eps' => ['required', 'string', 'max:120'],
             'telefono_paciente' => ['nullable', 'string', 'max:15', 'regex:/^[0-9]*$/'],
-            'municipio' => ['required', 'string', 'max:120'],
+            'municipio' => ['nullable', 'string', 'max:120'],
             'direccion' => ['nullable', 'string', 'max:25'],
             'urgencia_vital' => ['nullable', 'boolean'],
             'historia_clinica' => ['required', 'string'],
@@ -168,7 +229,7 @@ class InboxController extends Controller
         $recibido = $mensaje->recibido_en ? $mensaje->recibido_en->copy() : now();
         $quienResponde = $this->nombreUsuario($request);
 
-        $carpeta = $this->nombreCarpeta($request, 'Aceptaciones');
+        $carpeta = $this->nombreCarpeta($request, 'Gestionados');
 
         $solicitud = DB::transaction(function () use ($validated, $mensaje, $recibido, $quienResponde, $carpeta): SolicitudReferencia {
             $solicitud = SolicitudReferencia::create([
@@ -184,7 +245,7 @@ class InboxController extends Controller
                 'numero_documento' => $validated['numero_documento'],
                 'eps' => $validated['eps'],
                 'diagnostico' => $validated['diagnostico'],
-                'municipio_capita' => trim(preg_replace('/\s*,\s*/', ', ', $validated['municipio'])),
+                'municipio_capita' => isset($validated['municipio']) ? trim(preg_replace('/\s*,\s*/', ', ', $validated['municipio'])) : null,
                 'direccion_paciente' => $validated['direccion'] ?? null,
                 'telefono_paciente' => $validated['telefono_paciente'] ?? null,
                 'especialidad_requerida' => $validated['especialidad'],
@@ -296,6 +357,7 @@ class InboxController extends Controller
         }
 
         $validated = $request->validate([
+            'eps' => ['required', 'string', 'max:120', $this->epsConContrato()],
             'grupo_negacion' => ['required', Rule::in(['no_red', 'poblacion_objeto'])],
             'motivo_negacion' => ['required', 'string', 'max:250'],
             'observaciones' => ['nullable', 'string', 'max:1000'],
@@ -315,7 +377,7 @@ class InboxController extends Controller
 
         $grupo = $validated['grupo_negacion'] === 'no_red' ? 'Paciente no RED' : 'Población objeto';
         $quienResponde = $this->nombreUsuario($request);
-        $detalle = "Grupo: {$grupo} · Motivo: {$validated['motivo_negacion']}";
+        $detalle = "EPS: {$validated['eps']} · Grupo: {$grupo} · Motivo: {$validated['motivo_negacion']}";
         if (! empty($validated['observaciones'])) {
             $detalle .= " · Obs: {$validated['observaciones']}";
         }
@@ -325,6 +387,7 @@ class InboxController extends Controller
                 'emails.inbox-negada',
                 [
                     'mensaje' => $mensaje,
+                    'eps' => $validated['eps'],
                     'motivo' => $validated['motivo_negacion'],
                     'observaciones' => $validated['observaciones'] ?? null,
                     'quienResponde' => $quienResponde,
@@ -346,13 +409,117 @@ class InboxController extends Controller
             'gestion_por' => $quienResponde,
             'gestion_at' => now(),
             'gestion_detalle' => $detalle.' · Notificado a: '.implode(', ', $destinatarios),
-            'carpeta' => $this->nombreCarpeta($request, 'Negaciones'),
+            'carpeta' => $this->nombreCarpeta($request, 'Negados'),
         ]);
 
         return response()->json([
             'data' => $mensaje->fresh(),
             'message' => 'Negación enviada a '.implode(', ', $destinatarios),
         ]);
+    }
+
+    /**
+     * Reenvía a otro correo un mensaje que llegó a esta Bandeja por error:
+     * el cuerpo y los adjuntos originales van al destinatario indicado y, si
+     * se pide, el remitente recibe un aviso de que su correo fue redirigido.
+     */
+    public function reenviar(Request $request, InboxMensaje $mensaje, GmailService $gmail): JsonResponse
+    {
+        if ($mensaje->gestion || SolicitudReferencia::where('inbox_mensaje_id', $mensaje->id)->exists()) {
+            return response()->json(['message' => 'Este correo ya fue gestionado.'], 422);
+        }
+
+        $validated = $request->validate([
+            'para' => ['required', 'email', 'max:150'],
+            'nota' => ['nullable', 'string', 'max:1500'],
+            'avisar_remitente' => ['nullable', 'boolean'],
+            'carpeta' => ['nullable', 'string', 'max:60'],
+        ]);
+
+        $para = trim($validated['para']);
+        $avisar = (bool) ($validated['avisar_remitente'] ?? false) && filled($mensaje->remitente_email);
+        $quienResponde = $this->nombreUsuario($request);
+
+        try {
+            Mail::send(
+                'emails.inbox-reenvio',
+                [
+                    'mensaje' => $mensaje,
+                    'nota' => $validated['nota'] ?? null,
+                    'quienResponde' => $quienResponde,
+                ],
+                function ($message) use ($mensaje, $para, $gmail): void {
+                    $message->to($para)->subject('Fwd: '.($mensaje->asunto ?: '(sin asunto)'));
+                    if ($replyTo = config('mail.saliente_reply_to')) {
+                        $message->replyTo($replyTo, config('mail.saliente_reply_to_nombre'));
+                    }
+                    // Los adjuntos no se guardan en la Bandeja: se descargan
+                    // de Gmail/IMAP al momento de reenviar.
+                    foreach ($gmail->descargarAdjuntos($mensaje) as $adjunto) {
+                        $nombre = basename(str_replace('\\', '/', $adjunto['nombre'])) ?: 'adjunto';
+                        $message->attachData($adjunto['contenido'], $nombre, ['mime' => $adjunto['tipo'] ?: 'application/octet-stream']);
+                    }
+                }
+            );
+
+            if ($avisar) {
+                Mail::send(
+                    'emails.inbox-redirigida',
+                    ['mensaje' => $mensaje, 'quienResponde' => $quienResponde],
+                    function ($message) use ($mensaje): void {
+                        $message->to($mensaje->remitente_email)
+                            ->subject('Re: '.($mensaje->asunto ?: 'Su correo'));
+                        if ($replyTo = config('mail.saliente_reply_to')) {
+                            $message->replyTo($replyTo, config('mail.saliente_reply_to_nombre'));
+                        }
+                    }
+                );
+            }
+        } catch (Throwable) {
+            return response()->json(['message' => 'No se pudo reenviar el correo. Intente de nuevo en unos minutos.'], 503);
+        }
+
+        $detalle = "Reenviado a {$para}".($avisar ? ' · Aviso enviado al remitente' : '');
+        $mensaje->update([
+            'gestion' => 'reenviada',
+            'gestion_por' => $quienResponde,
+            'gestion_at' => now(),
+            'gestion_detalle' => $detalle,
+            'carpeta' => $this->nombreCarpeta($request, 'Gestionados'),
+        ]);
+
+        return response()->json([
+            'data' => $mensaje->fresh(),
+            'message' => "Correo reenviado a {$para}".($avisar ? ' y aviso enviado al remitente.' : '.'),
+        ]);
+    }
+
+    /**
+     * Correos de las clínicas registradas, para sugerir el destino al
+     * reenviar un correo que llegó a esta Bandeja por error.
+     */
+    public function correosClinicas(): JsonResponse
+    {
+        $clinicas = Clinica::whereNotNull('email')
+            ->where('email', '!=', '')
+            ->orderBy('nombre')
+            ->get(['nombre', 'email']);
+
+        return response()->json(['data' => $clinicas]);
+    }
+
+    /**
+     * La EPS debe traer su tipo de contrato: "NUEVA EPS" a secas no sirve,
+     * tiene que ser "NUEVA EPS PGP" o "NUEVA EPS EVENTO" — igual que al
+     * negar una solicitud desde el listado.
+     */
+    private function epsConContrato(): Closure
+    {
+        return function (string $atributo, mixed $valor, Closure $fail): void {
+            if (in_array(mb_strtoupper(trim((string) $valor)), SolicitudReferencia::EPS_CON_CONTRATO, true)) {
+                $fail('Seleccione la EPS con su tipo de contrato (por ejemplo NUEVA EPS PGP o NUEVA EPS EVENTO).');
+            }
+        };
     }
 
     private function nombreUsuario(Request $request): ?string
@@ -388,7 +555,7 @@ class InboxController extends Controller
 
             return response()->json([
                 'data' => $r,
-                'no_leidos' => InboxMensaje::where('leido', false)->count(),
+                'no_leidos' => InboxMensaje::where('leido', false)->whereNull('carpeta')->count(),
             ]);
         } catch (Throwable $e) {
             $gmail->registrarError($e->getMessage());

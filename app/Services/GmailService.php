@@ -37,22 +37,43 @@ class GmailService
 
     private const ALERTA_ACTIVA = 'inbox_alerta_activa';
 
+    private const ELIMINADOS = 'inbox_eliminados';
+
+    private const ELIMINADOS_MAX = 2000;
+
     private const FALLOS_MAXIMOS = 5;
+
+    /**
+     * Ajustes gmail_* leídos una sola vez por instancia — cada Setting::get
+     * es una consulta a la base de datos.
+     *
+     * @var array<string, mixed>
+     */
+    private array $ajustes = [];
+
+    private function ajuste(string $clave, mixed $defecto = null): mixed
+    {
+        if (! array_key_exists($clave, $this->ajustes)) {
+            $this->ajustes[$clave] = Setting::get($clave, $defecto);
+        }
+
+        return $this->ajustes[$clave];
+    }
 
     public function configurado(): bool
     {
-        if (! filled(Setting::get('gmail_buzon'))) {
+        if (! filled($this->ajuste('gmail_buzon'))) {
             return false;
         }
 
         return $this->esImap()
-            ? filled(Setting::get('gmail_password'))
-            : filled(Setting::get('gmail_credenciales'));
+            ? filled($this->ajuste('gmail_password'))
+            : filled($this->ajuste('gmail_credenciales'));
     }
 
     public function buzon(): ?string
     {
-        return Setting::get('gmail_buzon');
+        return $this->ajuste('gmail_buzon');
     }
 
     public function ultimaSync(): ?string
@@ -97,7 +118,7 @@ class GmailService
 
     public function esImap(): bool
     {
-        return Setting::get('gmail_modo', 'imap') !== 'servicio';
+        return $this->ajuste('gmail_modo', 'imap') !== 'servicio';
     }
 
     /**
@@ -199,7 +220,7 @@ class GmailService
 
             $ids = array_map(fn (Message $m): string => $m->getId(), $mensajes);
             $existentes = InboxMensaje::whereIn('gmail_id', $ids)->pluck('gmail_id')->flip();
-            $faltantes = array_filter($mensajes, fn (Message $m): bool => ! $existentes->has($m->getId()));
+            $faltantes = array_filter($mensajes, fn (Message $m): bool => ! $existentes->has($m->getId()) && ! $this->fueEliminado($m->getId()));
             $examinados += count($mensajes);
 
             foreach ($faltantes as $stub) {
@@ -278,7 +299,7 @@ class GmailService
             ->flip();
 
         // Se procesa del más viejo al más nuevo para que la marca avance sin dejar huecos.
-        $faltantes = array_filter($uids, fn (int $u): bool => ! $existentes->has('imap-'.$u));
+        $faltantes = array_filter($uids, fn (int $u): bool => ! $existentes->has('imap-'.$u) && ! $this->fueEliminado('imap-'.$u));
         sort($faltantes);
 
         // Paso 2: se descarga el contenido solo de los correos que faltan,
@@ -515,7 +536,8 @@ class GmailService
         $completo = fn (MessageQueryInterface $q): MessageQueryInterface => $q->withHeaders()->withFlags()->withBody();
 
         $this->imapMailbox()->inbox()->idle(function (ImapMessage $mensaje): void {
-            if (! InboxMensaje::where('gmail_id', 'imap-'.$mensaje->uid())->exists()) {
+            $uid = 'imap-'.$mensaje->uid();
+            if (! InboxMensaje::where('gmail_id', $uid)->exists() && ! $this->fueEliminado($uid)) {
                 $this->guardarImap($mensaje);
             }
             $this->marcarSync();
@@ -545,10 +567,46 @@ class GmailService
     }
 
     /**
+     * Marca un correo como eliminado a propósito: el borrado es definitivo en
+     * el aplicativo y el UID queda registrado para que la sincronización — y
+     * la auditoría de huecos — no lo vuelva a traer desde Gmail.
+     */
+    public function registrarEliminado(string $gmailId): void
+    {
+        $lista = array_keys($this->eliminados());
+        $lista[] = $gmailId;
+        $lista = array_slice(array_values(array_unique($lista)), -self::ELIMINADOS_MAX);
+
+        Setting::set(self::ELIMINADOS, (string) json_encode($lista));
+        $this->ajustes['eliminados'] = array_flip($lista);
+    }
+
+    private function fueEliminado(string $gmailId): bool
+    {
+        return isset($this->eliminados()[$gmailId]);
+    }
+
+    /**
+     * @return array<string, true>
+     */
+    private function eliminados(): array
+    {
+        if (! array_key_exists('eliminados', $this->ajustes)) {
+            $this->ajustes['eliminados'] = array_flip((array) json_decode((string) Setting::get(self::ELIMINADOS, '[]'), true));
+        }
+
+        return $this->ajustes['eliminados'];
+    }
+
+    /**
      * @param  array<string, mixed>  $datos
      */
     private function crearMensaje(array $datos): void
     {
+        if (isset($datos['gmail_id']) && $this->fueEliminado((string) $datos['gmail_id'])) {
+            return;
+        }
+
         try {
             InboxMensaje::create($datos);
 
@@ -626,7 +684,7 @@ class GmailService
             'encryption' => 'ssl',
             'username' => (string) $this->buzon(),
             // Google la muestra con espacios ("xxxx xxxx xxxx xxxx"); se quitan por si la pegan tal cual.
-            'password' => str_replace(' ', '', (string) Setting::get('gmail_password')),
+            'password' => str_replace(' ', '', (string) $this->ajuste('gmail_password')),
         ]);
     }
 
@@ -689,7 +747,7 @@ class GmailService
 
     private function gmail(): Gmail
     {
-        $credenciales = json_decode((string) Setting::get('gmail_credenciales'), true);
+        $credenciales = json_decode((string) $this->ajuste('gmail_credenciales'), true);
         if (! is_array($credenciales) || empty($credenciales['client_email'])) {
             throw new RuntimeException('Las credenciales de Gmail no son un JSON válido de cuenta de servicio.');
         }

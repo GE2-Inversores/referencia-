@@ -46,7 +46,7 @@ class SincronizacionBandejaTest extends TestCase
         $pendienteAyer = $this->correo();
         $pendienteAyer->forceFill(['created_at' => now()->subDay()])->save();
 
-        $gestionadoAyer = $this->correo(['gestion' => 'negada', 'carpeta' => 'Negaciones']);
+        $gestionadoAyer = $this->correo(['gestion' => 'negada', 'carpeta' => 'Negados']);
         $gestionadoAyer->forceFill(['created_at' => now()->subDays(3)])->save();
 
         // La fecha del encabezado es vieja, pero entró hoy: no debe borrarse.

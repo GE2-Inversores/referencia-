@@ -84,3 +84,8 @@ estructura para subir
 1. migraciones y correrarlas para que la BD se suba 
 cacsb@srv-1:~$ cd sites/referencia
 cacsb@srv-1:~/sites/referencia$ /opt/cpanel/ea-php83/root/usr/bin/php artisan migrate
+
+
+
+NOTAS
+1. 
