@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Resources\NotificationResource;
 use App\Models\Notification;
+use App\Services\GmailService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -28,11 +29,17 @@ class NotificationController extends BaseController
         );
     }
 
-    public function unreadCount(Request $request): JsonResponse
+    public function unreadCount(Request $request, GmailService $gmail): JsonResponse
     {
         $count = Notification::where('user_id', $request->user()->id)
             ->unread()
             ->count();
+
+        // Si el cron no está corriendo, cualquier sesión abierta mantiene la
+        // Bandeja al día: sincroniza en segundo plano cuando está atrasada.
+        if ($request->user()->hasPermission('inbox.view')) {
+            $gmail->respaldarSiEstaAtrasada();
+        }
 
         return $this->sendResponse(['count' => $count]);
     }

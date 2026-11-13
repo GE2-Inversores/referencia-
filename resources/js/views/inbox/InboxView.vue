@@ -749,7 +749,7 @@ async function abrir(m: InboxItem): Promise<void> {
 async function sincronizar(): Promise<void> {
   sincronizando.value = true;
   try {
-    const { data } = await http.post('/api/inbox/sincronizar');
+    const { data } = await http.post('/api/inbox/sincronizar', { auditar: true });
     noLeidos.value = data.no_leidos;
     notify.success(data.data.agregados > 0 ? `${data.data.agregados} correo(s) nuevo(s).` : 'Bandeja al día.');
     await cargar(true);

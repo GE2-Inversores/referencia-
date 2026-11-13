@@ -370,7 +370,7 @@ class InboxController extends Controller
         ]))) ?: null;
     }
 
-    public function sincronizar(GmailService $gmail): JsonResponse
+    public function sincronizar(Request $request, GmailService $gmail): JsonResponse
     {
         if (! $gmail->configurado()) {
             return response()->json([
@@ -383,7 +383,7 @@ class InboxController extends Controller
             // cada sesión abierta; si ya hay un sync en curso se retorna sin
             // duplicar la conexión con Gmail.
             $r = Cache::lock('inbox-sincronizar', 120)->get(
-                fn (): array => $gmail->sincronizar(limite: 100)
+                fn (): array => $gmail->sincronizar(limite: 100, auditar: $request->boolean('auditar'))
             ) ?? ['agregados' => 0, 'examinados' => 0];
 
             return response()->json([

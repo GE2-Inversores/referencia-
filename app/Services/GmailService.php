@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Models\InboxMensaje;
+use App\Models\Notification;
 use App\Models\Setting;
+use App\Models\User;
 use DirectoryTree\ImapEngine\Mailbox;
 use DirectoryTree\ImapEngine\MessageInterface as ImapMessage;
 use DirectoryTree\ImapEngine\MessageQueryInterface;
@@ -13,7 +15,9 @@ use Google\Service\Gmail\Message;
 use Google\Service\Gmail\MessagePart;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use RuntimeException;
 use Throwable;
 
@@ -24,6 +28,16 @@ class GmailService
     private const IMAP_HOST = 'imap.gmail.com';
 
     private const IMAP_PORT = 993;
+
+    private const MARCA_UID = 'gmail_marca_uid';
+
+    private const MARCA_VALIDEZ = 'gmail_marca_validez';
+
+    public const CORTE_UID = 'gmail_corte_uid';
+
+    private const ALERTA_ACTIVA = 'inbox_alerta_activa';
+
+    private const FALLOS_MAXIMOS = 5;
 
     public function configurado(): bool
     {
@@ -58,15 +72,27 @@ class GmailService
      *
      * @return array{agregados: int, examinados: int}
      */
-    public function sincronizar(bool $completo = false, int $limite = 500): array
+    public function sincronizar(bool $completo = false, int $limite = 500, bool $auditar = false): array
     {
         if (! $this->configurado()) {
             throw new RuntimeException('Gmail no está configurado: falta el buzón o las credenciales.');
         }
 
-        return $this->esImap()
-            ? $this->sincronizarImap($completo, $limite)
-            : $this->sincronizarGoogle($completo, $limite);
+        // La página sincroniza al abrirse y el cron cada minuto: sin candado
+        // dos procesos abrirían conexiones IMAP en paralelo sobre el mismo buzón.
+        $candado = Cache::lock('inbox-sync', 300);
+
+        if (! $candado->get()) {
+            return ['agregados' => 0, 'examinados' => 0];
+        }
+
+        try {
+            return $this->esImap()
+                ? $this->sincronizarImap($completo, $limite, $auditar)
+                : $this->sincronizarGoogle($completo, $limite);
+        } finally {
+            $candado->release();
+        }
     }
 
     public function esImap(): bool
@@ -208,37 +234,275 @@ class GmailService
      *
      * @return array{agregados: int, examinados: int}
      */
-    private function sincronizarImap(bool $completo, int $limite): array
+    private function sincronizarImap(bool $completo, int $limite, bool $auditar = false): array
     {
-        $consulta = $this->imapMailbox()->inbox()->messages()
-            ->withHeaders()
-            ->withFlags()
-            ->withBody()
-            ->newest();
+        $marca = (int) Setting::get(self::MARCA_UID, 0);
+        // La auditoría revisa todo lo llegado desde el último corte de medianoche,
+        // no solo lo posterior a la marca: recupera cualquier hueco del día.
+        $piso = $auditar ? (int) Setting::get(self::CORTE_UID, 0) : $marca;
 
-        // En modo incremental solo se revisa una ventana reciente; los
-        // correos ya guardados se descartan por su gmail_id (imap-{uid}).
-        if (! $completo) {
-            $consulta->since(now()->subDays(3));
-        }
+        // Paso 1 (liviano): solo los UID del buzón, sin descargar contenido.
+        // Gmail asigna UID crecientes, así que se pide todo lo posterior a la
+        // última marca: no depende de fechas ni de cuánto tiempo estuvo apagado.
+        [$uids, $validez] = $this->conReintento(function () use ($completo, $piso): array {
+            $inbox = $this->imapMailbox()->inbox();
+            $validez = (int) ($inbox->status()['UIDVALIDITY'] ?? 0);
+            $consulta = $inbox->messages()->newest();
 
-        $agregados = 0;
-        $examinados = 0;
-
-        $consulta->each(function (ImapMessage $mensaje) use (&$agregados, &$examinados, $limite): bool {
-            $examinados++;
-
-            if (! InboxMensaje::where('gmail_id', 'imap-'.$mensaje->uid())->exists()) {
-                $this->guardarImap($mensaje);
-                $agregados++;
+            if (! $completo) {
+                $piso > 0
+                    ? $consulta->uid($piso + 1, INF)
+                    : $consulta->since(now()->subDays(3));
             }
 
-            return $agregados < $limite;
-        }, 20);
+            return [$consulta->get()->map(fn (ImapMessage $m): int => $m->uid())->all(), $validez];
+        });
+
+        // Si Gmail reinicia la numeración del buzón (UIDVALIDITY), la marca
+        // anterior ya no sirve: se vuelve a la ventana reciente.
+        $validezAnterior = (int) Setting::get(self::MARCA_VALIDEZ, 0);
+        if ($validez > 0 && $validezAnterior > 0 && $validez !== $validezAnterior) {
+            $marca = $piso = 0;
+        }
+        if ($validez > 0) {
+            $this->guardarEstado(self::MARCA_VALIDEZ, $validez);
+        }
+
+        // `UID n:*` siempre devuelve al menos el último mensaje aunque n lo supere.
+        $uids = array_values(array_filter($uids, fn (int $u): bool => $piso === 0 || $u > $piso));
+        $examinados = count($uids);
+
+        $existentes = collect($uids)
+            ->chunk(500)
+            ->flatMap(fn ($grupo) => InboxMensaje::whereIn('gmail_id', $grupo->map(fn (int $u): string => 'imap-'.$u)->all())->pluck('gmail_id'))
+            ->flip();
+
+        // Se procesa del más viejo al más nuevo para que la marca avance sin dejar huecos.
+        $faltantes = array_filter($uids, fn (int $u): bool => ! $existentes->has('imap-'.$u));
+        sort($faltantes);
+
+        // Paso 2: se descarga el contenido solo de los correos que faltan,
+        // por una misma conexión y reconectando si Gmail la cierra.
+        $agregados = 0;
+        $inbox = null;
+        $avance = $marca;
+        $bloqueado = false;
+
+        foreach (array_slice($faltantes, 0, $limite) as $uid) {
+            try {
+                $mensaje = $this->conReintento(function (int $intento) use (&$inbox, $uid): ?ImapMessage {
+                    if ($intento > 1 || $inbox === null) {
+                        $inbox = $this->imapMailbox()->inbox();
+                    }
+
+                    return $inbox->messages()->withHeaders()->withFlags()->withBody()->find($uid);
+                });
+
+                if ($mensaje) {
+                    $this->guardarImap($mensaje);
+                    $agregados++;
+                }
+
+                Cache::forget("inbox_fallos_uid_{$uid}");
+            } catch (Throwable $e) {
+                // Un correo que no se logra descargar no puede bloquear a los
+                // demás ni perderse: se reintenta cada minuto y, tras varios
+                // fallos, queda visible en la bandeja con aviso.
+                $fallos = (int) Cache::get("inbox_fallos_uid_{$uid}", 0) + 1;
+                Cache::put("inbox_fallos_uid_{$uid}", $fallos, now()->addDay());
+                Log::warning('Bandeja: no se pudo descargar el correo.', ['uid' => $uid, 'fallos' => $fallos, 'error' => $e->getMessage()]);
+
+                if ($fallos >= self::FALLOS_MAXIMOS) {
+                    $this->crearMensaje($this->registroNoDescargado($uid));
+                    $agregados++;
+                    Cache::forget("inbox_fallos_uid_{$uid}");
+                } else {
+                    $bloqueado = true;
+                }
+            }
+
+            if (! $bloqueado) {
+                $avance = max($avance, $uid);
+            }
+        }
+
+        // Si se procesó todo lo pendiente, la marca llega al último UID visto.
+        if (! $bloqueado && count($faltantes) <= $limite && $uids !== []) {
+            $avance = max($avance, ...$uids);
+        }
+
+        if ($avance > 0 && $avance !== (int) Setting::get(self::MARCA_UID, 0)) {
+            $this->guardarEstado(self::MARCA_UID, $avance);
+        }
 
         $this->marcarSync();
 
         return ['agregados' => $agregados, 'examinados' => $examinados];
+    }
+
+    /**
+     * Ejecuta una operación IMAP reintentándola con una conexión nueva si
+     * Gmail la cierra (Server closed the connection / EOF).
+     *
+     * @template T
+     *
+     * @param  callable(int): T  $operacion  recibe el número de intento
+     * @return T
+     */
+    private function conReintento(callable $operacion, int $intentos = 3): mixed
+    {
+        for ($intento = 1; ; $intento++) {
+            try {
+                return $operacion($intento);
+            } catch (Throwable $e) {
+                if ($intento >= $intentos) {
+                    throw $e;
+                }
+
+                usleep(500_000 * $intento);
+            }
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function registroNoDescargado(int $uid): array
+    {
+        $nota = 'No se pudo descargar este correo desde Gmail. Ábralo directamente en el buzón.';
+
+        return [
+            'gmail_id' => 'imap-'.$uid,
+            'remitente' => '(correo no descargado)',
+            'asunto' => "Correo sin descargar (UID {$uid})",
+            'snippet' => $nota,
+            'cuerpo_texto' => $nota,
+            'tiene_adjuntos' => false,
+            'recibido_en' => now(),
+        ];
+    }
+
+    /**
+     * Fija el corte de la auditoría: todo UID anterior ya pasó por la
+     * limpieza de medianoche y no debe volver a traerse.
+     */
+    public function marcarCorteDelDia(): void
+    {
+        $marca = (int) Setting::get(self::MARCA_UID, 0);
+
+        if ($marca > 0) {
+            $this->guardarEstado(self::CORTE_UID, $marca);
+        }
+    }
+
+    private function guardarEstado(string $clave, int $valor): void
+    {
+        // Directo a la tabla: el modelo Setting es auditable y generaría un
+        // registro de auditoría por cada sincronización (cada minuto).
+        $consulta = DB::table('settings')->where('key', $clave);
+
+        $consulta->exists()
+            ? $consulta->update(['value' => (string) $valor, 'deleted_at' => null, 'updated_at' => now()])
+            : DB::table('settings')->insert(['key' => $clave, 'value' => (string) $valor, 'group' => 'inbox_estado', 'type' => 'string', 'created_at' => now(), 'updated_at' => now()]);
+    }
+
+    /**
+     * Vigilante: si la Bandeja lleva más de $minutos sin sincronizar con éxito
+     * (cron caído, credenciales vencidas, Gmail inaccesible) avisa una sola vez
+     * a quienes ven la Bandeja; cuando se recupera, avisa que volvió.
+     */
+    public function vigilar(int $minutos = 15): void
+    {
+        if (! $this->configurado()) {
+            return;
+        }
+
+        $ultima = $this->ultimaSync();
+        $atrasada = ! $ultima || Carbon::parse($ultima)->lt(now()->subMinutes($minutos));
+        $activa = Cache::has(self::ALERTA_ACTIVA);
+
+        if ($atrasada && ! $activa) {
+            Cache::forever(self::ALERTA_ACTIVA, true);
+            $detalle = $this->ultimoError() ? ' Último error: '.$this->ultimoError() : '';
+            $this->avisarBandeja(
+                '⚠️ La Bandeja de correo dejó de sincronizar',
+                'No se reciben correos nuevos desde '.($ultima ? Carbon::parse($ultima)->format('d/m/Y H:i') : 'nunca').'. Revise la conexión con Gmail.'.$detalle,
+                'error',
+            );
+        } elseif (! $atrasada && $activa) {
+            Cache::forget(self::ALERTA_ACTIVA);
+            $this->avisarBandeja('✅ La Bandeja de correo volvió a sincronizar', 'Ya se están recibiendo los correos de nuevo.', 'success');
+        }
+    }
+
+    /**
+     * Respaldo del cron: cuando alguien tiene la aplicación abierta y la última
+     * sincronización está atrasada, se sincroniza en segundo plano después de
+     * responder. Máximo un intento cada 2 minutos aunque falle.
+     */
+    public function respaldarSiEstaAtrasada(int $minutos = 3): void
+    {
+        if (! $this->configurado()) {
+            return;
+        }
+
+        $ultima = $this->ultimaSync();
+
+        if ($ultima && Carbon::parse($ultima)->gt(now()->subMinutes($minutos))) {
+            return;
+        }
+
+        if (! Cache::add('inbox_respaldo_intento', true, now()->addMinutes(2))) {
+            return;
+        }
+
+        defer(function (): void {
+            try {
+                $this->sincronizar(limite: 100);
+            } catch (Throwable $e) {
+                $this->registrarError($e->getMessage());
+                Log::warning('Bandeja: falló la sincronización de respaldo.', ['error' => $e->getMessage()]);
+            }
+
+            $this->vigilar();
+        });
+    }
+
+    private function avisarBandeja(string $titulo, string $mensaje, string $tipo): void
+    {
+        $usuarios = User::permission('inbox.view')->where('is_active', true)->get();
+        $ahora = now();
+
+        $filas = $usuarios->map(fn (User $u): array => [
+            'user_id' => $u->id,
+            'type' => $tipo,
+            'title' => $titulo,
+            'message' => $mensaje,
+            'link' => '/bandeja',
+            'read_at' => null,
+            'created_at' => $ahora,
+            'updated_at' => $ahora,
+        ])->all();
+
+        if ($filas !== []) {
+            Notification::insert($filas);
+        }
+
+        $correos = $usuarios->pluck('email')->push(config('mail.referencia_interna'))
+            ->filter(fn ($c): bool => filter_var($c, FILTER_VALIDATE_EMAIL) !== false)
+            ->unique()->values()->all();
+
+        if ($correos === []) {
+            return;
+        }
+
+        try {
+            Mail::raw($titulo."\n\n".$mensaje."\n\nSistema de Referencia Santa Bárbara", function ($m) use ($correos, $titulo): void {
+                $m->to($correos)->subject($titulo);
+            });
+        } catch (Throwable $e) {
+            Log::warning('Bandeja: no se pudo enviar el correo de alerta.', ['error' => $e->getMessage()]);
+        }
     }
 
     /**
