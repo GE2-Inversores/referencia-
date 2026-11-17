@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Mail\RespuestaEvolucionClinica;
 use App\Mail\SolicitudEvolucionClinica;
+use App\Models\Clinica;
 use App\Models\InboxMensaje;
 use App\Models\Notification;
 use App\Models\SolicitudEvolucion;
@@ -15,11 +16,14 @@ use App\Models\User;
 use App\Services\SqlQueryService;
 use App\Support\XlsxWriter;
 use Closure;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Mail\Message;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\Rule;
@@ -33,7 +37,9 @@ class SolicitudReferenciaController extends Controller
     {
         abort_unless(request()->user()->hasPermission('clinicas.view'), Response::HTTP_FORBIDDEN);
 
-        $solicitudes = SolicitudReferencia::with(['clinica', 'adjuntos', 'diagnosticos', 'eventos', 'evoluciones.adjuntos', 'evoluciones.respuestas'])
+        // Lista liviana: los adjuntos, las evoluciones y el texto de los eventos solo se usan al abrir
+        // el detalle, y se piden entonces con show() — así el refresco de cada 30 s pesa mucho menos.
+        $solicitudes = SolicitudReferencia::with(['clinica', 'diagnosticos', 'eventos:id,solicitud_referencia_id,tipo,titulo,created_at'])
             ->whereIn('estado', ['pendiente', 'pendiente_cama', 'en_espera'])
             ->orderByRaw("FIELD(estado, 'pendiente', 'pendiente_cama', 'en_espera')")
             ->orderBy('created_at', 'desc')
@@ -42,24 +48,215 @@ class SolicitudReferenciaController extends Controller
         return response()->json(['data' => $solicitudes]);
     }
 
-    /** Histórico de solicitudes ya resueltas (completadas o negadas). */
-    public function historico(): JsonResponse
+    private const ESTADOS_HISTORICO = ['completado', 'negado', 'cancelado'];
+
+    /**
+     * Histórico de solicitudes ya resueltas (completadas, negadas o canceladas),
+     * paginado y filtrado en el servidor: solo viaja la página pedida con los
+     * campos de la tarjeta — el detalle completo se pide con show() al abrirla.
+     */
+    public function historico(Request $request): JsonResponse
     {
-        abort_unless(request()->user()->hasPermission('clinicas.view'), Response::HTTP_FORBIDDEN);
+        abort_unless($request->user()->hasPermission('clinicas.view'), Response::HTTP_FORBIDDEN);
 
-        $solicitudes = SolicitudReferencia::with(['clinica', 'adjuntos', 'diagnosticos', 'eventos', 'evoluciones.adjuntos', 'evoluciones.respuestas'])
-            ->whereIn('estado', ['completado', 'negado', 'cancelado'])
-            ->orderBy('updated_at', 'desc')
-            ->get();
+        $porPagina = (int) $request->input('por_pagina', 10);
+        $pagina = $this->historicoFiltrado($request)
+            ->select([
+                'id', 'clinica_id', 'fecha', 'hora', 'primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido',
+                'tipo_documento', 'numero_documento', 'eps', 'estado', 'especialidad_requerida', 'diagnostico',
+                'quien_remitente', 'telefono_contacto', 'urgencia_vital', 'origen', 'created_at', 'updated_at',
+            ])
+            ->with([
+                'clinica:id,nombre',
+                'diagnosticos:id,solicitud_referencia_id,codigo_cie10,descripcion',
+                // Solo los eventos que marcan la resolución: sirven para el tiempo de resolución de la tarjeta.
+                'eventos' => fn ($q) => $q->whereIn('tipo', ['completado', 'negada', 'negado'])->select(['id', 'solicitud_referencia_id', 'tipo', 'created_at']),
+            ])
+            ->paginate($porPagina);
 
-        return response()->json(['data' => $solicitudes]);
+        $meta = [
+            'total' => $pagina->total(),
+            'pagina' => $pagina->currentPage(),
+            'paginas' => $pagina->lastPage(),
+            'por_pagina' => $porPagina,
+            ...$this->resumenHistorico(),
+        ];
+
+        if ($request->boolean('filtros')) {
+            $meta['filtros'] = $this->filtrosHistorico();
+        }
+
+        return response()->json(['data' => $pagina->items(), 'meta' => $meta]);
+    }
+
+    /** Ids de todo lo que cumple los filtros del histórico — para exportar a Excel sin importar la página. */
+    public function historicoIds(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->hasPermission('clinicas.view'), Response::HTTP_FORBIDDEN);
+
+        return response()->json([
+            'data' => $this->historicoFiltrado($request)->limit(20000)->pluck('solicitudes_referencia.id'),
+        ]);
+    }
+
+    /**
+     * Consulta base del histórico con los filtros y el orden pedidos.
+     *
+     * @return Builder<SolicitudReferencia>
+     */
+    private function historicoFiltrado(Request $request): Builder
+    {
+        $f = $request->validate([
+            'page' => ['nullable', 'integer', 'min:1'],
+            'por_pagina' => ['nullable', Rule::in([10, 15, 25, 50])],
+            'estado' => ['nullable', Rule::in(['pendiente', 'pendiente_cama', 'en_espera', ...self::ESTADOS_HISTORICO])],
+            'clinica_id' => ['nullable', 'integer'],
+            'especialidad' => ['nullable', 'string', 'max:150'],
+            'eps' => ['nullable', 'string', 'max:150'],
+            'origen' => ['nullable', Rule::in(['correo', 'aplicativo'])],
+            'desde' => ['nullable', 'date_format:Y-m-d'],
+            'hasta' => ['nullable', 'date_format:Y-m-d'],
+            'buscar' => ['nullable', 'string', 'max:120'],
+            'orden' => ['nullable', Rule::in(['fecha', 'paciente', 'clinica', 'especialidad'])],
+            'dir' => ['nullable', Rule::in(['asc', 'desc'])],
+        ]);
+
+        $consulta = SolicitudReferencia::query()
+            ->whereIn('solicitudes_referencia.estado', self::ESTADOS_HISTORICO)
+            ->when($f['estado'] ?? null, fn (Builder $q, string $estado) => $q->where('solicitudes_referencia.estado', $estado))
+            ->when($f['clinica_id'] ?? null, fn (Builder $q, int $id) => $q->where('clinica_id', $id))
+            ->when($f['especialidad'] ?? null, fn (Builder $q, string $v) => $q->where('especialidad_requerida', $v))
+            ->when($f['eps'] ?? null, fn (Builder $q, string $v) => $q->where('eps', $v))
+            ->when($f['origen'] ?? null, fn (Builder $q, string $v) => $q->where('origen', $v))
+            ->when($f['desde'] ?? null, fn (Builder $q, string $v) => $q->where('solicitudes_referencia.created_at', '>=', Carbon::parse($v)->startOfDay()))
+            ->when($f['hasta'] ?? null, fn (Builder $q, string $v) => $q->where('solicitudes_referencia.created_at', '<=', Carbon::parse($v)->endOfDay()));
+
+        $texto = trim((string) ($f['buscar'] ?? ''));
+        if ($texto !== '') {
+            $like = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $texto).'%';
+            $soloDocumento = preg_match('/^[\d.\s-]+$/', $texto) === 1 ? '%'.preg_replace('/[.\s-]/', '', $texto).'%' : null;
+
+            $consulta->where(function (Builder $q) use ($like, $soloDocumento): void {
+                $q->whereRaw("CONCAT_WS(' ', primer_nombre, segundo_nombre, primer_apellido, segundo_apellido) LIKE ?", [$like])
+                    ->orWhere('eps', 'like', $like)
+                    ->orWhere('especialidad_requerida', 'like', $like)
+                    ->orWhere('numero_documento', 'like', $like)
+                    ->orWhereHas('clinica', fn (Builder $c) => $c->where('nombre', 'like', $like));
+
+                if ($soloDocumento !== null && $soloDocumento !== '%%') {
+                    $q->orWhereRaw("REPLACE(REPLACE(REPLACE(numero_documento, '.', ''), ' ', ''), '-', '') LIKE ?", [$soloDocumento]);
+                }
+            });
+        }
+
+        $dir = ($f['dir'] ?? 'desc') === 'asc' ? 'asc' : 'desc';
+
+        match ($f['orden'] ?? 'fecha') {
+            'paciente' => $consulta->orderByRaw("CONCAT_WS(' ', primer_nombre, segundo_nombre, primer_apellido, segundo_apellido) {$dir}"),
+            'clinica' => $consulta->orderBy(Clinica::select('nombre')->whereColumn('clinicas.id', 'solicitudes_referencia.clinica_id'), $dir),
+            'especialidad' => $consulta->orderBy('especialidad_requerida', $dir),
+            default => $consulta->orderBy('solicitudes_referencia.created_at', $dir),
+        };
+
+        return $consulta->orderBy('solicitudes_referencia.id', $dir);
+    }
+
+    /**
+     * Totales del histórico completo (sin filtros): contadores de las pestañas,
+     * serie de los últimos 14 días y comparación de los últimos 7 días contra
+     * los 7 anteriores — lo que antes se calculaba en el navegador con todas las filas.
+     *
+     * @return array<string, mixed>
+     */
+    private function resumenHistorico(): array
+    {
+        $porEstado = SolicitudReferencia::query()
+            ->whereIn('estado', self::ESTADOS_HISTORICO)
+            ->selectRaw('estado, COUNT(*) as total')
+            ->groupBy('estado')
+            ->pluck('total', 'estado');
+
+        $hoy = now()->startOfDay();
+        $inicioSerie = $hoy->copy()->subDays(13);
+
+        $dias = SolicitudReferencia::query()
+            ->whereIn('estado', ['completado', 'negado'])
+            ->where('created_at', '>=', $inicioSerie)
+            ->selectRaw('DATE(created_at) as dia, estado, COUNT(*) as total')
+            ->groupBy('dia', 'estado')
+            ->get()
+            ->groupBy('dia');
+
+        $serie = collect(range(0, 13))->map(function (int $i) use ($inicioSerie, $dias): array {
+            $dia = $inicioSerie->copy()->addDays($i);
+            $delDia = $dias->get($dia->toDateString(), collect())->pluck('total', 'estado');
+
+            return [
+                'fecha' => $dia->toDateString(),
+                'completadas' => (int) ($delDia['completado'] ?? 0),
+                'negadas' => (int) ($delDia['negado'] ?? 0),
+            ];
+        })->all();
+
+        $semanaActual = now()->subDays(7);
+        $semanaPrevia = now()->subDays(14);
+        $semanas = SolicitudReferencia::query()
+            ->whereIn('estado', self::ESTADOS_HISTORICO)
+            ->where('created_at', '>=', $semanaPrevia)
+            ->selectRaw('estado, SUM(created_at >= ?) as actual, SUM(created_at < ?) as previa', [$semanaActual, $semanaActual])
+            ->groupBy('estado')
+            ->get()
+            ->keyBy('estado');
+
+        $delta = fn (array $estados): array => [
+            (int) collect($estados)->sum(fn (string $e): int => (int) ($semanas[$e]->actual ?? 0)),
+            (int) collect($estados)->sum(fn (string $e): int => (int) ($semanas[$e]->previa ?? 0)),
+        ];
+
+        return [
+            'resumen' => [
+                'total' => (int) $porEstado->sum(),
+                'completadas' => (int) ($porEstado['completado'] ?? 0),
+                'negadas' => (int) ($porEstado['negado'] ?? 0),
+                'canceladas' => (int) ($porEstado['cancelado'] ?? 0),
+            ],
+            'serie' => $serie,
+            'deltas' => [
+                'total' => $delta(self::ESTADOS_HISTORICO),
+                'completado' => $delta(['completado']),
+                'negado' => $delta(['negado']),
+            ],
+        ];
+    }
+
+    /**
+     * Opciones de los filtros de clínica y especialidad: solo las que aparecen en el histórico.
+     *
+     * @return array{clinicas: Collection<int, Clinica>, especialidades: Collection<int, string>}
+     */
+    private function filtrosHistorico(): array
+    {
+        $historico = SolicitudReferencia::query()->whereIn('estado', self::ESTADOS_HISTORICO);
+
+        return [
+            'clinicas' => Clinica::query()
+                ->whereIn('id', (clone $historico)->whereNotNull('clinica_id')->select('clinica_id')->distinct())
+                ->orderBy('nombre')
+                ->get(['id', 'nombre']),
+            'especialidades' => (clone $historico)
+                ->whereNotNull('especialidad_requerida')
+                ->where('especialidad_requerida', '!=', '')
+                ->distinct()
+                ->orderBy('especialidad_requerida')
+                ->pluck('especialidad_requerida'),
+        ];
     }
 
     public function show(SolicitudReferencia $solicitud): JsonResponse
     {
         abort_unless(request()->user()->hasPermission('clinicas.view'), Response::HTTP_FORBIDDEN);
 
-        return response()->json(['data' => $solicitud->load(['clinica', 'diagnosticos', 'eventos'])]);
+        return response()->json(['data' => $solicitud->load(['clinica', 'diagnosticos', 'eventos', 'adjuntos', 'evoluciones.adjuntos', 'evoluciones.respuestas'])]);
     }
 
     public function aceptar(Request $request, SolicitudReferencia $solicitud): JsonResponse

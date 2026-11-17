@@ -8,7 +8,7 @@ use Throwable;
 
 class InboxSync extends Command
 {
-    protected $signature = 'inbox:sync {--completo : Recorre todo el historial del buzón} {--auditar : Revisa todo lo llegado hoy y recupera lo que falte} {--limite=500 : Máximo de mensajes nuevos por ejecución}';
+    protected $signature = 'inbox:sync {--completo : Recorre todo el historial del buzón} {--auditar : Revisa todo lo llegado hoy y recupera lo que falte} {--limite=500 : Máximo de mensajes nuevos por ejecución} {--segundos=50 : Tiempo máximo de trabajo; lo pendiente se trae en la siguiente ejecución (0 = sin tope)}';
 
     protected $description = 'Sincroniza la bandeja del aplicativo con los correos del buzón de Gmail';
 
@@ -25,6 +25,7 @@ class InboxSync extends Command
                 completo: (bool) $this->option('completo'),
                 auditar: (bool) $this->option('auditar'),
                 limite: (int) $this->option('limite'),
+                maxSegundos: (int) $this->option('segundos') ?: null,
             );
 
             $this->info("Bandeja sincronizada: {$r['agregados']} nuevos de {$r['examinados']} examinados.");

@@ -2390,7 +2390,20 @@ async function cargarThumbnails(s: Solicitud) {
   }
 }
 
-function verDetalle(s: Solicitud) {
+/** La lista no trae adjuntos, evoluciones ni el texto de los eventos: se piden completos al abrir el detalle. */
+async function cargarCompleta(s: Solicitud): Promise<Solicitud | null> {
+  try {
+    const { data } = await http.get(`/api/solicitudes-referencia/${s.id}`);
+    return { ...s, ...data.data };
+  } catch {
+    notify.error('No se pudo cargar la solicitud.');
+    return null;
+  }
+}
+
+async function verDetalle(listada: Solicitud) {
+  const s = await cargarCompleta(listada);
+  if (!s) return;
   limpiarThumbnails();
   solicitudSeleccionada.value = s;
   adjuntoActivo.value = null;
@@ -2431,7 +2444,9 @@ async function responderEvolucion(evolucionId: number): Promise<void> {
   }
 }
 
-function verEvoluciones(solicitud: Solicitud): void {
+async function verEvoluciones(listada: Solicitud): Promise<void> {
+  const solicitud = await cargarCompleta(listada);
+  if (!solicitud) return;
   solicitudSeleccionada.value = solicitud;
   modalEvoluciones.value = true;
 }

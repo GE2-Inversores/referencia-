@@ -14,6 +14,7 @@ use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
@@ -24,6 +25,9 @@ use Throwable;
 
 class InboxController extends Controller
 {
+    /** Segundos durante los que una sincronización reciente evita que la Bandeja abierta vuelva a conectarse a Gmail. */
+    private const SYNC_AUTOMATICA_FRESCA = 90;
+
     public function index(Request $request, GmailService $gmail): JsonResponse
     {
         // Solo las columnas que muestra la lista: el cuerpo y los adjuntos se
@@ -569,12 +573,28 @@ class InboxController extends Controller
             ], 422);
         }
 
+        // El botón de sincronizar manda `auditar`; la Bandeja abierta llama sola cada minuto sin él.
+        $manual = $request->boolean('auditar');
+        $ultima = $gmail->ultimaSync();
+
+        // Si el cron (u otra sesión) sincronizó hace poco no hace falta abrir otra conexión con Gmail.
+        if (! $manual && $ultima && Carbon::parse($ultima)->gt(now()->subSeconds(self::SYNC_AUTOMATICA_FRESCA))) {
+            return response()->json([
+                'data' => ['agregados' => 0, 'examinados' => 0],
+                'no_leidos' => InboxMensaje::where('leido', false)->whereNull('carpeta')->count(),
+            ]);
+        }
+
         try {
             // Candado: la Bandeja dispara este endpoint periódicamente desde
             // cada sesión abierta; si ya hay un sync en curso se retorna sin
-            // duplicar la conexión con Gmail.
-            $r = Cache::lock('inbox-sincronizar', 120)->get(
-                fn (): array => $gmail->sincronizar(limite: 100, auditar: $request->boolean('auditar'))
+            // duplicar la conexión con Gmail. Cada ejecución desde la web es
+            // pequeña y acotada en tiempo para no dejar ocupado el servidor;
+            // el grueso del trabajo lo hace el cron.
+            $r = Cache::lock('inbox-sincronizar', 60)->get(
+                fn (): array => $manual
+                    ? $gmail->sincronizar(limite: 100, auditar: true, maxSegundos: 25)
+                    : $gmail->sincronizar(limite: 20, maxSegundos: 10)
             ) ?? ['agregados' => 0, 'examinados' => 0];
 
             return response()->json([

@@ -53,12 +53,12 @@
       </el-input>
       <div class="sol-chips-actions">
         <el-tooltip content="Actualizar" placement="top">
-          <button class="sol-icon-btn" @click="cargar">
+          <button class="sol-icon-btn" @click="cargar()">
             <component :is="RefreshIcon" class="w-3.5 h-3.5" :class="{ 'animate-spin': cargando }" />
           </button>
         </el-tooltip>
         <el-tooltip content="Exportar Excel" placement="top">
-          <button class="sol-icon-btn" :disabled="solicitudesFiltradas.length === 0 || exportando" @click="exportarExcel">
+          <button class="sol-icon-btn" :disabled="totalFiltrado === 0 || exportando" @click="exportarExcel">
             <component :is="DownloadIcon" class="w-3.5 h-3.5" />
           </button>
         </el-tooltip>
@@ -238,8 +238,8 @@
         <!-- Pagination -->
         <div class="sol-pagination">
           <span class="sol-pagination-info">
-            Mostrando {{ (paginaActual - 1) * itemsPorPagina + 1 }}–{{ Math.min(paginaActual * itemsPorPagina, solicitudesFiltradas.length) }}
-            de {{ solicitudesFiltradas.length }}
+            Mostrando {{ (paginaActual - 1) * itemsPorPagina + 1 }}–{{ Math.min(paginaActual * itemsPorPagina, totalFiltrado) }}
+            de {{ totalFiltrado }}
           </span>
           <div class="sol-pagination-controls">
             <button class="sol-pagination-btn" :disabled="paginaActual === 1" @click="paginaActual--">
@@ -802,22 +802,21 @@ const filtroEstado = ref<'' | 'completado' | 'negado' | 'cancelado' | 'en_espera
 const filtroOrigen = ref<'' | 'correo' | 'aplicativo'>('');
 const seleccionadas = ref<Set<number>>(new Set());
 
-watch([itemsPorPagina, rangoFechas, filtroClinica, filtroEspecialidad, filtroEps, filtroEstado, buscarDebounced], () => {
-  paginaActual.value = 1;
-});
-
 const modalDetalle = ref(false);
 const modalHistoriaClinica = ref(false);
 const modalPdf = ref(false);
 const solicitudSeleccionada = ref<Solicitud | null>(null);
 const adjuntoActivo = ref<{ id: number; nombre_original: string; mime_type: string; tamano: number } | null>(null);
 
-const resumen = computed(() => ({
-  total: solicitudes.value.length,
-  completadas: solicitudes.value.filter(s => s.estado === 'completado').length,
-  negadas: solicitudes.value.filter(s => s.estado === 'negado').length,
-  canceladas: solicitudes.value.filter(s => s.estado === 'cancelado').length,
-}));
+// Todo lo agregado (contadores, serie de 14 días, comparación semanal y
+// opciones de filtro) lo calcula el servidor: aquí solo vive la página actual.
+const totalFiltrado = ref(0);
+const totalPaginas = ref(1);
+const resumen = ref({ total: 0, completadas: 0, negadas: 0, canceladas: 0 });
+const serieServidor = ref<{ fecha: string; completadas: number; negadas: number }[]>([]);
+const deltasServidor = ref<Record<'total' | 'completado' | 'negado', [number, number]>>({ total: [0, 0], completado: [0, 0], negado: [0, 0] });
+const clinicasUnicas = ref<Clinica[]>([]);
+const especialidadesUnicas = ref<string[]>([]);
 
 const tabs = computed<{ label: string; value: 'todas' | 'completado' | 'negado' | 'cancelado'; count: number }[]>(() => [
   { label: 'Todas', value: 'todas', count: resumen.value.total },
@@ -826,56 +825,19 @@ const tabs = computed<{ label: string; value: 'todas' | 'completado' | 'negado' 
   { label: 'Canceladas', value: 'cancelado', count: resumen.value.canceladas },
 ]);
 
-const isoDia = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const serieDiasTotal = computed(() => serieServidor.value.map(b => b.completadas + b.negadas));
+const serieDiasCompletadas = computed(() => serieServidor.value.map(b => b.completadas));
+const serieDiasNegadas = computed(() => serieServidor.value.map(b => b.negadas));
 
-interface EvoBucket { cat: string; completadas: number; negadas: number; }
-
-/** Conteo real de completadas/negadas por día en los últimos 14 días. */
-function bucketsEvolucion(): EvoBucket[] {
-  const ahora = new Date();
-  const DIAS = 14;
-  const keys = Array.from({ length: DIAS }, (_, i) => {
-    const d = new Date(ahora); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (DIAS - 1 - i));
-    return { key: isoDia(d), cat: d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }) };
-  });
-  const buckets: EvoBucket[] = keys.map(k => ({ cat: k.cat, completadas: 0, negadas: 0 }));
-  const idx = new Map(keys.map((k, i) => [k.key, i]));
-  for (const s of solicitudes.value) {
-    if (!s.created_at) continue;
-    const f = new Date(s.created_at);
-    if (isNaN(f.getTime())) continue;
-    const i = idx.get(isoDia(f));
-    if (i == null) continue;
-    if (s.estado === 'completado') buckets[i].completadas++;
-    else if (s.estado === 'negado') buckets[i].negadas++;
-  }
-  return buckets;
-}
-
-const evolucionDia = computed(() => bucketsEvolucion());
-
-const serieDiasTotal = computed(() => evolucionDia.value.map(b => b.completadas + b.negadas));
-const serieDiasCompletadas = computed(() => evolucionDia.value.map(b => b.completadas));
-const serieDiasNegadas = computed(() => evolucionDia.value.map(b => b.negadas));
-
-/** Variación últimos 7 días vs los 7 anteriores (por created_at). */
-function deltaUltimos7(estado?: 'completado' | 'negado'): string {
-  const SEMANA = 7 * 24 * 60 * 60 * 1000;
-  const ahora = Date.now();
-  let act = 0, prev = 0;
-  for (const s of solicitudes.value) {
-    if (estado && s.estado !== estado) continue;
-    const diff = ahora - new Date(s.created_at).getTime();
-    if (diff >= 0 && diff < SEMANA) act++;
-    else if (diff >= SEMANA && diff < 2 * SEMANA) prev++;
-  }
+/** Variación últimos 7 días vs los 7 anteriores (por created_at), calculada en el servidor. */
+function textoDelta([act, prev]: [number, number]): string {
   if (!prev) return act ? `↑ ${act} últimos 7 días` : 'Sin movimiento';
   const pct = Math.round(((act - prev) / prev) * 100);
   return `${pct >= 0 ? '↑' : '↓'} ${Math.abs(pct)}% vs. período anterior`;
 }
-const deltaTotal = computed(() => deltaUltimos7());
-const deltaCompletadas = computed(() => deltaUltimos7('completado'));
-const deltaNegadas = computed(() => deltaUltimos7('negado'));
+const deltaTotal = computed(() => textoDelta(deltasServidor.value.total));
+const deltaCompletadas = computed(() => textoDelta(deltasServidor.value.completado));
+const deltaNegadas = computed(() => textoDelta(deltasServidor.value.negado));
 
 const displayStats = ref([0, 0, 0]);
 
@@ -892,18 +854,6 @@ function animateCounters(targets: number[]) {
   };
   requestAnimationFrame(tick);
 }
-
-const clinicasUnicas = computed(() => {
-  const map = new Map<number, string>();
-  for (const s of solicitudes.value) {
-    if (s.clinica) map.set(s.clinica.id, s.clinica.nombre);
-  }
-  return [...map.entries()].map(([id, nombre]) => ({ id, nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre));
-});
-
-const especialidadesUnicas = computed(() =>
-  [...new Set(solicitudes.value.map(s => s.especialidad_requerida).filter(Boolean))].sort((a, b) => a.localeCompare(b))
-);
 
 const hayFiltrosActivos = computed(() =>
   !!filtro.value.buscar || tabActiva.value !== 'todas' || !!rangoFechas.value ||
@@ -922,46 +872,7 @@ function onEstadoSelect(v: string | undefined) {
   if (v) tabActiva.value = 'todas';
 }
 
-const solicitudesFiltradas = computed(() => {
-  let result = solicitudes.value.filter(s => {
-    if (tabActiva.value !== 'todas' && s.estado !== tabActiva.value) return false;
-    if (filtroEstado.value !== '' && s.estado !== filtroEstado.value) return false;
-    if (filtroClinica.value !== '' && s.clinica_id !== filtroClinica.value) return false;
-    if (filtroEspecialidad.value !== '' && s.especialidad_requerida !== filtroEspecialidad.value) return false;
-    if (filtroEps.value !== '' && s.eps !== filtroEps.value) return false;
-    if (filtroOrigen.value !== '' && (s.origen || 'aplicativo') !== filtroOrigen.value) return false;
-    if (rangoFechas.value) {
-      const f = s.created_at?.slice(0, 10) ?? '';
-      if (f < rangoFechas.value[0] || f > rangoFechas.value[1]) return false;
-    }
-    const texto = buscarDebounced.value.trim().toLowerCase();
-    const cedulaBuscada = /^[\d.\s-]+$/.test(texto) ? texto.replace(/[.\s-]/g, '') : '';
-    const coincideTexto = !texto ||
-      nombreCompleto(s).toLowerCase().includes(texto) ||
-      s.eps.toLowerCase().includes(texto) ||
-      s.especialidad_requerida.toLowerCase().includes(texto) ||
-      s.clinica?.nombre.toLowerCase().includes(texto) ||
-      s.numero_documento.toLowerCase().includes(texto) ||
-      (cedulaBuscada !== '' && s.numero_documento.replace(/[.\s-]/g, '').includes(cedulaBuscada));
-    return coincideTexto;
-  });
-  const dir = sortDir.value === 'asc' ? 1 : -1;
-  result = [...result].sort((a, b) => {
-    let va = '', vb = '';
-    if (sortKey.value === 'paciente') { va = nombreCompleto(a).toLowerCase(); vb = nombreCompleto(b).toLowerCase(); }
-    else if (sortKey.value === 'clinica') { va = (a.clinica?.nombre ?? '').toLowerCase(); vb = (b.clinica?.nombre ?? '').toLowerCase(); }
-    else if (sortKey.value === 'especialidad') { va = (a.especialidad_requerida ?? '').toLowerCase(); vb = (b.especialidad_requerida ?? '').toLowerCase(); }
-    else { va = a.created_at; vb = b.created_at; }
-    return va < vb ? -dir : va > vb ? dir : 0;
-  });
-  return result;
-});
-
-const totalPaginas = computed(() => Math.max(1, Math.ceil(solicitudesFiltradas.value.length / itemsPorPagina.value)));
-const solicitudesPaginadas = computed(() => {
-  const start = (paginaActual.value - 1) * itemsPorPagina.value;
-  return solicitudesFiltradas.value.slice(start, start + itemsPorPagina.value);
-});
+const solicitudesPaginadas = computed(() => solicitudes.value);
 
 /** Páginas numeradas con elipsis: 1 2 … p-1 p p+1 … t-1 t */
 const paginasVisibles = computed<(number | string)[]>(() => {
@@ -1023,36 +934,50 @@ function tiempoResolucion(s: Solicitud): string {
   return rh ? `${d}d ${rh}h` : `${d}d`;
 }
 
-async function exportarPdfFila(s: Solicitud) {
+/** La lista solo trae lo de la tarjeta: el detalle completo (historia clínica, adjuntos, eventos) se pide al abrir. */
+async function cargarCompleta(s: Solicitud): Promise<Solicitud | null> {
   try {
-    await exportarSolicitudPdf(s);
+    const { data } = await http.get(`/api/solicitudes-referencia/${s.id}`);
+    return { ...s, ...data.data };
+  } catch {
+    notify.error('No se pudo cargar la solicitud.');
+    return null;
+  }
+}
+
+async function exportarPdfFila(s: Solicitud) {
+  const completa = await cargarCompleta(s);
+  if (!completa) return;
+  try {
+    await exportarSolicitudPdf(completa);
   } catch {
     notify.error('No se pudo generar el PDF. Intente de nuevo.');
   }
 }
 
-function verHistoria(s: Solicitud) {
-  solicitudSeleccionada.value = s;
+async function verHistoria(s: Solicitud) {
+  const completa = await cargarCompleta(s);
+  if (!completa) return;
+  solicitudSeleccionada.value = completa;
   abrirHistoriaClinica();
 }
-
 
 function cambiarTab(tab: 'todas' | 'completado' | 'negado' | 'cancelado') {
   tabActiva.value = tab;
   filtroEstado.value = '';
-  paginaActual.value = 1;
 }
 
 const exportando = ref(false);
 
 async function exportarExcel() {
-  const rows = seleccionadas.value.size
-    ? solicitudesFiltradas.value.filter(s => seleccionadas.value.has(s.id))
-    : solicitudesFiltradas.value;
   try {
     exportando.value = true;
-    await exportarSolicitudesExcel(rows.map(s => s.id), 'historico');
-    notify.success(`Exportadas ${rows.length} solicitudes a Excel`);
+    // Con filas marcadas se exportan solo esas; si no, todo lo que cumple los filtros (de cualquier página).
+    const ids = seleccionadas.value.size
+      ? [...seleccionadas.value]
+      : (await http.get<{ data: number[] }>('/api/solicitudes-referencia/historico/ids', { params: parametrosFiltros() })).data.data;
+    await exportarSolicitudesExcel(ids, 'historico');
+    notify.success(`Exportadas ${ids.length} solicitudes a Excel`);
   } catch {
     notify.error('No se pudo generar el Excel.');
   } finally {
@@ -1320,11 +1245,69 @@ async function aplicarResaltado() {
   router.replace({ query: resto });
 }
 
-async function cargar() {
+/** Filtros activos tal como los entiende el servidor (el chip de estado y el select de estado nunca coexisten). */
+function parametrosFiltros() {
+  return {
+    estado: filtroEstado.value || (tabActiva.value !== 'todas' ? tabActiva.value : undefined),
+    clinica_id: filtroClinica.value || undefined,
+    especialidad: filtroEspecialidad.value || undefined,
+    eps: filtroEps.value || undefined,
+    origen: filtroOrigen.value || undefined,
+    desde: rangoFechas.value?.[0],
+    hasta: rangoFechas.value?.[1],
+    buscar: buscarDebounced.value.trim() || undefined,
+    orden: sortKey.value,
+    dir: sortDir.value,
+  };
+}
+
+interface RespuestaHistorico {
+  data: Solicitud[];
+  meta: {
+    total: number;
+    paginas: number;
+    resumen: typeof resumen.value;
+    serie: typeof serieServidor.value;
+    deltas: typeof deltasServidor.value;
+    filtros?: { clinicas: Clinica[]; especialidades: string[] };
+  };
+}
+
+// Solo vale la última respuesta: si el usuario cambia de filtro o de página
+// mientras otra petición sigue en vuelo, la vieja se descarta al llegar.
+let ultimaPeticion = 0;
+let filtrosCargados = false;
+
+async function pedirPagina(conFiltros: boolean): Promise<RespuestaHistorico | null> {
+  const peticion = ++ultimaPeticion;
+  const { data } = await http.get<RespuestaHistorico>('/api/solicitudes-referencia/historico', {
+    params: { ...parametrosFiltros(), page: paginaActual.value, por_pagina: itemsPorPagina.value, filtros: conFiltros || !filtrosCargados ? 1 : undefined },
+  });
+  return peticion === ultimaPeticion ? data : null;
+}
+
+function aplicarMeta(meta: RespuestaHistorico['meta']) {
+  totalFiltrado.value = meta.total;
+  totalPaginas.value = Math.max(1, meta.paginas);
+  resumen.value = meta.resumen;
+  serieServidor.value = meta.serie;
+  deltasServidor.value = meta.deltas;
+  if (meta.filtros) {
+    filtrosCargados = true;
+    clinicasUnicas.value = meta.filtros.clinicas;
+    especialidadesUnicas.value = meta.filtros.especialidades;
+  }
+  // Si quedó una página vacía (se resolvieron filas desde otra sesión), se vuelve a la última que existe.
+  if (paginaActual.value > totalPaginas.value) paginaActual.value = totalPaginas.value;
+}
+
+async function cargar(conFiltros = true) {
   try {
     cargando.value = true;
-    const { data } = await http.get('/api/solicitudes-referencia/historico');
-    solicitudes.value = data.data;
+    const respuesta = await pedirPagina(conFiltros);
+    if (!respuesta) return;
+    solicitudes.value = respuesta.data;
+    aplicarMeta(respuesta.meta);
     animateCounters([resumen.value.total, resumen.value.completadas, resumen.value.negadas]);
   } catch {
     notify.error('Error al cargar el histórico');
@@ -1337,14 +1320,27 @@ async function cargar() {
  * carga ni anima nada; solo actualiza los datos cuando algo cambió. */
 async function cargarSilencioso() {
   try {
-    const { data } = await http.get('/api/solicitudes-referencia/historico');
-    const cambiados = actualizarSiCambio(solicitudes, data.data);
+    const respuesta = await pedirPagina(false);
+    if (!respuesta) return;
+    const cambiados = actualizarSiCambio(solicitudes, respuesta.data);
+    aplicarMeta(respuesta.meta);
     if (cambiados.length === 0) return;
     displayStats.value = [resumen.value.total, resumen.value.completadas, resumen.value.negadas];
   } catch {
     // Refresco de fondo: si falla, se reintenta en el siguiente ciclo sin interrumpir al usuario.
   }
 }
+
+// Cualquier cambio de filtro, búsqueda u orden vuelve a la página 1 y pide los datos al servidor;
+// si ya se estaba en otra página, el cambio de página es lo que dispara la carga (una sola petición).
+watch([tabActiva, filtroEstado, filtroClinica, filtroEspecialidad, filtroEps, filtroOrigen, rangoFechas, buscarDebounced, sortKey, sortDir, itemsPorPagina], () => {
+  if (paginaActual.value !== 1) {
+    paginaActual.value = 1;
+    return;
+  }
+  void cargar(false);
+});
+watch(paginaActual, () => { void cargar(false); });
 
 const thumbnails = ref<Map<number, string>>(new Map());
 
@@ -1370,9 +1366,11 @@ async function cargarThumbnails(s: Solicitud) {
   }
 }
 
-function verDetalle(s: Solicitud) {
+async function verDetalle(s: Solicitud) {
+  const completa = await cargarCompleta(s);
+  if (!completa) return;
   limpiarThumbnails();
-  solicitudSeleccionada.value = s;
+  solicitudSeleccionada.value = completa;
   adjuntoActivo.value = null;
   if (pdfBlobUrl.value) {
     URL.revokeObjectURL(pdfBlobUrl.value);
@@ -1380,7 +1378,7 @@ function verDetalle(s: Solicitud) {
   }
   modalHistoriaClinica.value = false;
   modalDetalle.value = true;
-  cargarThumbnails(s);
+  cargarThumbnails(completa);
 }
 
 function cerrarDetalle() {
@@ -1432,7 +1430,9 @@ function horaActual(): string {
   return `${String(now.getHours()).padStart(2, '0')}:${String(Math.floor(now.getMinutes() / 5) * 5).padStart(2, '0')}`;
 }
 
-function abrirCambiar(s: Solicitud) {
+async function abrirCambiar(listada: Solicitud) {
+  const s = await cargarCompleta(listada);
+  if (!s) return;
   solicitudSeleccionada.value = s;
   formCambiar.value = {
     fecha_respuesta: fechaActual(),
@@ -1466,16 +1466,9 @@ async function cambiarEstado() {
     procesando.value = true;
     const { data } = await http.post(`/api/solicitudes-referencia/${solicitudSeleccionada.value!.id}/cambiar-estado`, f);
     notify.success(data.message || 'Estado actualizado');
-    const idx = solicitudes.value.findIndex(s => s.id === solicitudSeleccionada.value!.id);
-    if (idx !== -1) {
-      if (['completado', 'negado', 'cancelado'].includes(data.data.estado)) {
-        solicitudes.value[idx] = data.data;
-      } else {
-        // Salió del histórico hacia la cola activa — se quita de esta vista.
-        solicitudes.value.splice(idx, 1);
-      }
-    }
     modalCambiar.value = false;
+    // Si salió del histórico hacia la cola activa o cambió de pestaña, la página y los contadores se vuelven a pedir.
+    await cargarSilencioso();
   } catch (e: any) {
     notify.error(e.response?.data?.message || 'Error al cambiar el estado');
   } finally {
@@ -1498,8 +1491,8 @@ function aplicarEstadoQuery() {
 }
 
 onMounted(async () => {
-  await cargar();
   aplicarEstadoQuery();
+  await cargar();
   await aplicarResaltado();
 });
 

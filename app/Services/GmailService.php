@@ -7,6 +7,7 @@ use App\Models\Notification;
 use App\Models\Setting;
 use App\Models\User;
 use DirectoryTree\ImapEngine\BodyStructurePart;
+use DirectoryTree\ImapEngine\FolderInterface;
 use DirectoryTree\ImapEngine\Mailbox;
 use DirectoryTree\ImapEngine\MessageInterface as ImapMessage;
 use DirectoryTree\ImapEngine\MessageQueryInterface;
@@ -93,10 +94,13 @@ class GmailService
      * Sincroniza el buzón: trae los mensajes que aún no están en la tabla.
      * `$completo` recorre todo el historial; si no, se detiene al encontrar
      * un mensaje ya sincronizado (los listados vienen de más nuevo a más viejo).
+     * `$maxSegundos` acota cuánto trabaja esta ejecución: al agotarse se detiene y
+     * lo pendiente se trae en la siguiente (así una sync lanzada desde una petición
+     * web no deja ocupado el servidor).
      *
      * @return array{agregados: int, examinados: int}
      */
-    public function sincronizar(bool $completo = false, int $limite = 500, bool $auditar = false): array
+    public function sincronizar(bool $completo = false, int $limite = 500, bool $auditar = false, ?int $maxSegundos = null): array
     {
         if (! $this->configurado()) {
             throw new RuntimeException('Gmail no está configurado: falta el buzón o las credenciales.');
@@ -104,7 +108,9 @@ class GmailService
 
         // La página sincroniza al abrirse y el cron cada minuto: sin candado
         // dos procesos abrirían conexiones IMAP en paralelo sobre el mismo buzón.
-        $candado = Cache::lock('inbox-sync', 300);
+        // El candado dura lo que puede tardar la ejecución más un margen: si el proceso muere,
+        // no deja la sincronización bloqueada para todos durante minutos.
+        $candado = Cache::lock('inbox-sync', ($maxSegundos ?? 240) + 60);
 
         if (! $candado->get()) {
             return ['agregados' => 0, 'examinados' => 0];
@@ -112,8 +118,8 @@ class GmailService
 
         try {
             return $this->esImap()
-                ? $this->sincronizarImap($completo, $limite, $auditar)
-                : $this->sincronizarGoogle($completo, $limite);
+                ? $this->sincronizarImap($completo, $limite, $auditar, $maxSegundos)
+                : $this->sincronizarGoogle($completo, $limite, $maxSegundos);
         } finally {
             $candado->release();
         }
@@ -351,8 +357,9 @@ class GmailService
     /**
      * @return array{agregados: int, examinados: int}
      */
-    private function sincronizarGoogle(bool $completo, int $limite): array
+    private function sincronizarGoogle(bool $completo, int $limite, ?int $maxSegundos = null): array
     {
+        $inicio = microtime(true);
         $gmail = $this->gmail();
         $agregados = 0;
         $examinados = 0;
@@ -378,7 +385,7 @@ class GmailService
                 $this->crearMensaje($this->mapear($mensaje));
                 $agregados++;
 
-                if ($agregados >= $limite) {
+                if ($agregados >= $limite || ($maxSegundos !== null && microtime(true) - $inicio >= $maxSegundos)) {
                     $this->marcarSync();
 
                     return ['agregados' => $agregados, 'examinados' => $examinados];
@@ -405,8 +412,9 @@ class GmailService
      *
      * @return array{agregados: int, examinados: int}
      */
-    private function sincronizarImap(bool $completo, int $limite, bool $auditar = false): array
+    private function sincronizarImap(bool $completo, int $limite, bool $auditar = false, ?int $maxSegundos = null): array
     {
+        $inicio = microtime(true);
         $marca = (int) Setting::get(self::MARCA_UID, 0);
         // La auditoría revisa todo lo llegado desde el último corte de medianoche,
         // no solo lo posterior a la marca: recupera cualquier hueco del día.
@@ -458,15 +466,22 @@ class GmailService
         $inbox = null;
         $avance = $marca;
         $bloqueado = false;
+        $incompleto = false;
 
         foreach (array_slice($faltantes, 0, $limite) as $uid) {
+            if ($maxSegundos !== null && microtime(true) - $inicio >= $maxSegundos) {
+                $incompleto = true;
+
+                break;
+            }
+
             try {
                 $mensaje = $this->conReintento(function (int $intento) use (&$inbox, $uid): ?ImapMessage {
                     if ($intento > 1 || $inbox === null) {
                         $inbox = $this->imapMailbox()->inbox();
                     }
 
-                    return $inbox->messages()->withHeaders()->withFlags()->withBody()->find($uid);
+                    return $this->descargarCorreoImap($inbox, $uid);
                 });
 
                 if ($mensaje) {
@@ -498,7 +513,7 @@ class GmailService
         }
 
         // Si se procesó todo lo pendiente, la marca llega al último UID visto.
-        if (! $bloqueado && count($faltantes) <= $limite && $uids !== []) {
+        if (! $bloqueado && ! $incompleto && count($faltantes) <= $limite && $uids !== []) {
             $avance = max($avance, ...$uids);
         }
 
@@ -509,6 +524,30 @@ class GmailService
         $this->marcarSync();
 
         return ['agregados' => $agregados, 'examinados' => $examinados];
+    }
+
+    /**
+     * Descarga un correo sin traer sus adjuntos: solo encabezados, banderas y la
+     * estructura; el texto y el HTML se piden como partes sueltas al leerlos.
+     * Un correo con 20 MB de PDF pesa lo mismo que uno sin adjuntos, y el contenido
+     * de los archivos solo se baja cuando alguien los abre. Si la estructura no
+     * trae ninguna parte de texto, se baja completo como antes para no perderlo.
+     */
+    private function descargarCorreoImap(FolderInterface $inbox, int $uid): ?ImapMessage
+    {
+        $mensaje = $inbox->messages()->withHeaders()->withFlags()->find($uid);
+
+        if ($mensaje === null) {
+            return null;
+        }
+
+        $estructura = $mensaje->bodyStructure(true);
+
+        if ($estructura !== null && ($estructura->text() !== null || $estructura->html() !== null)) {
+            return $mensaje;
+        }
+
+        return $inbox->messages()->withHeaders()->withFlags()->withBody()->find($uid);
     }
 
     /**
@@ -629,7 +668,7 @@ class GmailService
 
         defer(function (): void {
             try {
-                $this->sincronizar(limite: 100);
+                $this->sincronizar(limite: 20, maxSegundos: 10);
             } catch (Throwable $e) {
                 $this->registrarError($e->getMessage());
                 Log::warning('Bandeja: falló la sincronización de respaldo.', ['error' => $e->getMessage()]);
@@ -832,6 +871,7 @@ class GmailService
             'host' => self::IMAP_HOST,
             'port' => self::IMAP_PORT,
             'encryption' => 'ssl',
+            'timeout' => 15,
             'username' => (string) $this->buzon(),
             // Google la muestra con espacios ("xxxx xxxx xxxx xxxx"); se quitan por si la pegan tal cual.
             'password' => str_replace(' ', '', (string) $this->ajuste('gmail_password')),
@@ -853,8 +893,9 @@ class GmailService
             ->filter()
             ->implode(', ');
 
-        $texto = $mensaje->text();
-        $html = $mensaje->html();
+        // Con el correo completo se lee de lo ya descargado; si llegó liviano, pide solo esas partes.
+        $texto = $mensaje->text(true);
+        $html = $mensaje->html(true);
 
         if ($texto === null && $html !== null) {
             $texto = $this->htmlATexto($html);

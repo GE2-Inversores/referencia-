@@ -55,8 +55,8 @@ class InformeReferenciaService
     {
         $solicitudes = SolicitudReferencia::query()
             ->with(['clinica:id,nombre', 'diagnosticos'])
-            ->whereDate('fecha', '>=', $desde->toDateString())
-            ->whereDate('fecha', '<=', $hasta->toDateString())
+            ->where('fecha', '>=', $desde->toDateString())
+            ->where('fecha', '<', $hasta->copy()->addDay()->toDateString())
             ->orderBy('fecha')
             ->orderBy('hora')
             ->get();
@@ -494,8 +494,8 @@ class InformeReferenciaService
 
         $solicitudes = SolicitudReferencia::query()
             ->select(['id', 'fecha', 'hora', 'hora_respuesta', 'estado'])
-            ->whereDate('fecha', '>=', $anteriorDesde->toDateString())
-            ->whereDate('fecha', '<=', $anteriorHasta->toDateString())
+            ->where('fecha', '>=', $anteriorDesde->toDateString())
+            ->where('fecha', '<', $anteriorHasta->copy()->addDay()->toDateString())
             ->get();
 
         return [

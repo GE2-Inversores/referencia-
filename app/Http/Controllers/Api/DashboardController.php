@@ -8,12 +8,44 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 
 class DashboardController extends BaseController
 {
     private const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
+    /** Segundos que se reutiliza el cálculo entre usuarios (el dashboard ya se refresca cada 30 s). */
+    private const CACHE_SEGUNDOS = 20;
+
+    private const CACHE_VERSION = 'dashboard_stats_version';
+
+    /**
+     * Descarta los cálculos guardados: se llama cuando cambia una solicitud, una
+     * clínica o un usuario, para que el dashboard no muestre números viejos.
+     */
+    public static function invalidarCache(): void
+    {
+        Cache::forever(self::CACHE_VERSION, (string) Str::uuid());
+    }
+
+    /**
+     * Las estadísticas son las mismas para todos los usuarios con acceso: mientras nada cambie, el
+     * primero que las pide hace el cálculo pesado y los demás reciben el resultado ya guardado.
+     */
     public function stats(Request $request): JsonResponse
+    {
+        $filtros = $request->query();
+        ksort($filtros);
+        $clave = 'dashboard_stats:'.Cache::get(self::CACHE_VERSION, '0').':'.md5(http_build_query($filtros));
+
+        $contenido = Cache::remember($clave, self::CACHE_SEGUNDOS, fn (): string => $this->calcularStats($request)->getContent());
+
+        return new JsonResponse($contenido, 200, [], 0, true);
+    }
+
+    private function calcularStats(Request $request): JsonResponse
     {
         // Filtros de dimensión (estado/especialidad/eps/clínica) — se aplican
         // tanto al query principal como a las tendencias, que llevan su propia
@@ -33,11 +65,12 @@ class DashboardController extends BaseController
         }
 
         $query = (clone $queryDims);
-        if ($request->filled('desde')) {
-            $query->whereDate('solicitudes_referencia.created_at', '>=', $request->input('desde'));
+        // Rango sobre la columna sin envolverla en DATE(): así MySQL puede usar el índice de created_at.
+        if ($desde = $this->fechaPanel($request, 'desde')) {
+            $query->where('solicitudes_referencia.created_at', '>=', $desde->startOfDay());
         }
-        if ($request->filled('hasta')) {
-            $query->whereDate('solicitudes_referencia.created_at', '<=', $request->input('hasta'));
+        if ($hasta = $this->fechaPanel($request, 'hasta')) {
+            $query->where('solicitudes_referencia.created_at', '<=', $hasta->endOfDay());
         }
 
         // Período independiente de cada panel (día/semana/mes/año/todo) —
@@ -66,34 +99,41 @@ class DashboardController extends BaseController
         // La dona tiene período propio — sus conteos viven aparte de los
         // KPIs, que siguen respondiendo solo a los filtros generales.
         $qDonut = $this->queryPanel($queryDims, $query, $pDonut, $fDonut);
+        // Un solo conteo agrupado por estado en vez de una consulta por cada cifra.
+        $porEstadoDonut = $this->conteoPorEstado($qDonut);
         $distribucion = [
-            'total' => (clone $qDonut)->count(),
-            'pendientes' => (clone $qDonut)->whereIn('solicitudes_referencia.estado', ['pendiente', 'pendiente_cama'])->count(),
-            'en_espera' => (clone $qDonut)->where('solicitudes_referencia.estado', 'en_espera')->count(),
-            'completadas' => (clone $qDonut)->where('solicitudes_referencia.estado', 'completado')->count(),
-            'negadas' => (clone $qDonut)->where('solicitudes_referencia.estado', 'negado')->count(),
-            'canceladas' => (clone $qDonut)->where('solicitudes_referencia.estado', 'cancelado')->count(),
+            'total' => (int) $porEstadoDonut->sum(),
+            'pendientes' => (int) ($porEstadoDonut['pendiente'] ?? 0) + (int) ($porEstadoDonut['pendiente_cama'] ?? 0),
+            'en_espera' => (int) ($porEstadoDonut['en_espera'] ?? 0),
+            'completadas' => (int) ($porEstadoDonut['completado'] ?? 0),
+            'negadas' => (int) ($porEstadoDonut['negado'] ?? 0),
+            'canceladas' => (int) ($porEstadoDonut['cancelado'] ?? 0),
         ];
 
-        $solicitudesTotal = (clone $query)->count();
+        $porEstado = $this->conteoPorEstado($query);
+        $solicitudesTotal = (int) $porEstado->sum();
         // "Pendientes de gestión" incluye las nuevas (pendiente) y las
         // aceptadas en espera de cupo (pendiente_cama) — ambas esperan acción.
-        $solicitudesPendientes = (clone $query)->whereIn('solicitudes_referencia.estado', ['pendiente', 'pendiente_cama'])->count();
-        $solicitudesEnEspera = (clone $query)->where('solicitudes_referencia.estado', 'en_espera')->count();
-        $solicitudesCompletadas = (clone $query)->where('solicitudes_referencia.estado', 'completado')->count();
-        $solicitudesNegadas = (clone $query)->where('solicitudes_referencia.estado', 'negado')->count();
+        $solicitudesPendientes = (int) ($porEstado['pendiente'] ?? 0) + (int) ($porEstado['pendiente_cama'] ?? 0);
+        $solicitudesEnEspera = (int) ($porEstado['en_espera'] ?? 0);
+        $solicitudesCompletadas = (int) ($porEstado['completado'] ?? 0);
+        $solicitudesNegadas = (int) ($porEstado['negado'] ?? 0);
         // "Aceptadas" ya no es un estado propio (aceptar pasa directo a
         // "en espera") — para la tasa de aceptación se cuenta como toda
         // solicitud que avanzó más allá de pendiente sin ser negada.
-        $solicitudesAceptadas = $solicitudesEnEspera + $solicitudesCompletadas + (clone $query)->where('solicitudes_referencia.estado', 'pendiente_cama')->count();
+        $solicitudesAceptadas = $solicitudesEnEspera + $solicitudesCompletadas + (int) ($porEstado['pendiente_cama'] ?? 0);
 
-        $clinicasTotal = Clinica::count();
-        $clinicasActivas = Clinica::where('is_active', true)->count();
-        $clinicasPendientes = Clinica::where('estado', 'pendiente')->count();
-        $clinicasNuevasMes = Clinica::where('created_at', '>=', now()->startOfMonth())->count();
+        $clinicas = Clinica::query()
+            ->selectRaw('COUNT(*) as total, SUM(is_active = 1) as activas, SUM(estado = ?) as pendientes, SUM(created_at >= ?) as nuevas_mes', ['pendiente', now()->startOfMonth()])
+            ->first();
+        $clinicasTotal = (int) $clinicas->total;
+        $clinicasActivas = (int) $clinicas->activas;
+        $clinicasPendientes = (int) $clinicas->pendientes;
+        $clinicasNuevasMes = (int) $clinicas->nuevas_mes;
 
-        $usuariosTotal = User::count();
-        $usuariosActivos = User::where('is_active', true)->count();
+        $usuarios = User::query()->selectRaw('COUNT(*) as total, SUM(is_active = 1) as activos')->first();
+        $usuariosTotal = (int) $usuarios->total;
+        $usuariosActivos = (int) $usuarios->activos;
 
         $solicitudesRecientes = $this->queryPanel($queryDims, $query, $pRecientes, $fRecientes)->with('clinica:id,nombre')
             ->select('id', 'clinica_id', 'tipo_documento', 'numero_documento', 'primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido', 'telefono_contacto', 'estado', 'especialidad_requerida', 'eps', 'fecha', 'hora', 'hora_respuesta', 'created_at')
@@ -138,14 +178,15 @@ class DashboardController extends BaseController
         $tendenciaAnterior = $this->tendenciaPeriodo(clone $queryDims, $granularidad, $fTendencia, anterior: true);
         $tendenciaClinicas = $this->tendenciaUltimosDias(Clinica::class, 14);
         $tendenciaUsuarios = $this->tendenciaUltimosDias(User::class, 14);
-        $tendenciaPendientes = $this->tendenciaUltimosDias(SolicitudReferencia::class, 14, fn ($q) => $q->whereIn('estado', ['pendiente', 'pendiente_cama']), 0, $queryDims);
-        $tendenciaPendientesAnterior = $this->tendenciaUltimosDias(SolicitudReferencia::class, 14, fn ($q) => $q->whereIn('estado', ['pendiente', 'pendiente_cama']), 14, $queryDims);
-        $tendenciaEnEspera = $this->tendenciaUltimosDias(SolicitudReferencia::class, 14, fn ($q) => $q->where('estado', 'en_espera'), 0, $queryDims);
-        $tendenciaEnEsperaAnterior = $this->tendenciaUltimosDias(SolicitudReferencia::class, 14, fn ($q) => $q->where('estado', 'en_espera'), 14, $queryDims);
-        $tendenciaCompletadas = $this->tendenciaUltimosDias(SolicitudReferencia::class, 14, fn ($q) => $q->where('estado', 'completado'), 0, $queryDims);
-        $tendenciaCompletadasAnterior = $this->tendenciaUltimosDias(SolicitudReferencia::class, 14, fn ($q) => $q->where('estado', 'completado'), 14, $queryDims);
-        $tendenciaNegadas = $this->tendenciaUltimosDias(SolicitudReferencia::class, 14, fn ($q) => $q->where('estado', 'negado'), 0, $queryDims);
-        $tendenciaNegadasAnterior = $this->tendenciaUltimosDias(SolicitudReferencia::class, 14, fn ($q) => $q->where('estado', 'negado'), 14, $queryDims);
+        $porEstadoDia = $this->conteoDiarioPorEstado($queryDims, 14);
+        $tendenciaPendientes = $this->serieDeEstados($porEstadoDia, ['pendiente', 'pendiente_cama'], 14, 0);
+        $tendenciaPendientesAnterior = $this->serieDeEstados($porEstadoDia, ['pendiente', 'pendiente_cama'], 14, 14);
+        $tendenciaEnEspera = $this->serieDeEstados($porEstadoDia, ['en_espera'], 14, 0);
+        $tendenciaEnEsperaAnterior = $this->serieDeEstados($porEstadoDia, ['en_espera'], 14, 14);
+        $tendenciaCompletadas = $this->serieDeEstados($porEstadoDia, ['completado'], 14, 0);
+        $tendenciaCompletadasAnterior = $this->serieDeEstados($porEstadoDia, ['completado'], 14, 14);
+        $tendenciaNegadas = $this->serieDeEstados($porEstadoDia, ['negado'], 14, 0);
+        $tendenciaNegadasAnterior = $this->serieDeEstados($porEstadoDia, ['negado'], 14, 14);
 
         // Hace cuánto está esperando revisión la solicitud pendiente más
         // antigua — el volumen total no dice si el personal va al día o si
@@ -189,8 +230,9 @@ class DashboardController extends BaseController
 
         $qEspPeriodo = $this->queryPanel($queryDims, $query, $pEspecialidades, $fEspecialidades);
         $qCliPeriodo = $this->queryPanel($queryDims, $query, $pClinicas, $fClinicas);
-        $topClinicas = $this->topConSparkline(clone $qCliPeriodo, 'clinicas.nombre', 'clinicas', 5, (clone $qCliPeriodo)->count());
-        $topEspecialidadesConSerie = $this->topConSparkline(clone $qEspPeriodo, 'especialidad_requerida', 'especialidades', 5, (clone $qEspPeriodo)->count());
+        $ultimos14Dias = $this->tendenciaUltimosDias(SolicitudReferencia::class, 14);
+        $topClinicas = $this->topConSparkline(clone $qCliPeriodo, 'clinicas.nombre', 'clinicas', 5, (clone $qCliPeriodo)->count(), $ultimos14Dias);
+        $topEspecialidadesConSerie = $this->topConSparkline(clone $qEspPeriodo, 'especialidad_requerida', 'especialidades', 5, (clone $qEspPeriodo)->count(), $ultimos14Dias);
 
         $porEps = (clone $query)
             ->select('eps')
@@ -519,6 +561,57 @@ class DashboardController extends BaseController
     }
 
     /**
+     * Cuántas solicitudes hay por estado en una sola consulta.
+     *
+     * @return Collection<string, int>
+     */
+    private function conteoPorEstado($query): Collection
+    {
+        return (clone $query)
+            ->selectRaw('solicitudes_referencia.estado as estado, COUNT(*) as total')
+            ->groupBy('solicitudes_referencia.estado')
+            ->pluck('total', 'estado');
+    }
+
+    /**
+     * Solicitudes por día y estado de las últimas dos ventanas de $dias días
+     * (la actual y la anterior) en una sola consulta.
+     *
+     * @return Collection<string, Collection>
+     */
+    private function conteoDiarioPorEstado($base, int $dias): Collection
+    {
+        return (clone $base)
+            ->whereBetween('created_at', [now()->subDays(2 * $dias - 1)->startOfDay(), now()->endOfDay()])
+            ->selectRaw('DATE(created_at) as dia, estado, COUNT(*) as total')
+            ->groupByRaw('DATE(created_at), estado')
+            ->get()
+            ->groupBy('dia');
+    }
+
+    /**
+     * Serie diaria de los últimos $dias días (desplazada $offsetDias hacia atrás)
+     * sumando los estados indicados, a partir de conteoDiarioPorEstado().
+     *
+     * @param  Collection<string, Collection>  $porEstadoDia
+     * @param  array<int, string>  $estados
+     * @return array<int, array{fecha: string, total: int}>
+     */
+    private function serieDeEstados(Collection $porEstadoDia, array $estados, int $dias, int $offsetDias): array
+    {
+        $resultado = [];
+        for ($i = $dias - 1; $i >= 0; $i--) {
+            $fecha = now()->subDays($i + $offsetDias)->format('Y-m-d');
+            $resultado[] = [
+                'fecha' => $fecha,
+                'total' => (int) $porEstadoDia->get($fecha, collect())->whereIn('estado', $estados)->sum('total'),
+            ];
+        }
+
+        return $resultado;
+    }
+
+    /**
      * Conteo diario de registros nuevos de $modelClass en los últimos $dias
      * días (opcionalmente acotado con $scope, ej. solo estado 'pendiente').
      * Genérico para poder graficar la misma tendencia sobre Solicitudes,
@@ -563,9 +656,8 @@ class DashboardController extends BaseController
      *
      * @return array<int, array{nombre: string, total: int, pct: int, serie: array<int, int>}>
      */
-    private function topConSparkline($query, string $columna, string $tipo, int $limite, ?int $totalBase = null): array
+    private function topConSparkline($query, string $columna, string $tipo, int $limite, ?int $totalBase, array $porDia): array
     {
-        $porDia = $this->tendenciaUltimosDias(SolicitudReferencia::class, 14);
         $dias = array_column($porDia, 'fecha');
 
         if ($tipo === 'clinicas') {
@@ -654,12 +746,14 @@ class DashboardController extends BaseController
             }
         }
 
+        // Las bandas y el promedio se calculan en SQL por bucket — no se traen las filas a PHP.
         $filas = SolicitudReferencia::query()
             ->whereNotNull('hora_respuesta')
             ->where('created_at', '>=', $desde)
-            ->selectRaw("{$bucketSel} as b, {$expresion} as m")
+            ->selectRaw("{$bucketSel} as b, COUNT(*) as n, SUM(({$expresion}) <= 120) as hasta2, SUM(({$expresion}) > 120 AND ({$expresion}) <= 240) as de2a4, AVG({$expresion}) as prom")
+            ->groupBy('b')
             ->get()
-            ->groupBy('b');
+            ->keyBy('b');
 
         // Lista completa de buckets esperados con su etiqueta visible.
         $buckets = [];
@@ -683,17 +777,17 @@ class DashboardController extends BaseController
 
         $resultado = [];
         foreach ($buckets as $clave => $etiqueta) {
-            $del = $filas->get($clave, collect());
-            $hasta2 = $del->filter(fn ($r) => $r->m <= 120)->count();
-            $de2a4 = $del->filter(fn ($r) => $r->m > 120 && $r->m <= 240)->count();
-            $mas4 = $del->count() - $hasta2 - $de2a4;
+            $del = $filas->get($clave);
+            $total = (int) ($del->n ?? 0);
+            $hasta2 = (int) ($del->hasta2 ?? 0);
+            $de2a4 = (int) ($del->de2a4 ?? 0);
             $resultado[] = [
                 'fecha' => (string) $clave,
                 'etiqueta' => $etiqueta,
                 'hasta2' => $hasta2,
                 'de2a4' => $de2a4,
-                'mas4' => $mas4,
-                'avg_horas' => $del->count() ? round($del->avg('m') / 60, 1) : 0,
+                'mas4' => $total - $hasta2 - $de2a4,
+                'avg_horas' => $total ? round($del->prom / 60, 1) : 0,
             ];
         }
 
@@ -738,13 +832,14 @@ class DashboardController extends BaseController
         $expresion = "TIMESTAMPDIFF(MINUTE, CONCAT(fecha, ' ', hora), CONCAT(fecha, ' ', hora_respuesta))"
             ." + IF(TIMESTAMPDIFF(MINUTE, CONCAT(fecha, ' ', hora), CONCAT(fecha, ' ', hora_respuesta)) < 0, 1440, 0)";
 
-        $filas = $query->whereNotNull('hora_respuesta')
-            ->selectRaw("{$expresion} as minutos")
-            ->pluck('minutos');
+        // Un solo conteo por bandas en SQL — no se traen todos los minutos a PHP.
+        $bandas = $query->whereNotNull('hora_respuesta')
+            ->selectRaw("COUNT(*) as total, SUM(({$expresion}) <= 120) as hasta2, SUM(({$expresion}) > 120 AND ({$expresion}) <= 240) as de2a4")
+            ->first();
 
-        $total = $filas->count();
-        $hasta2 = $filas->filter(fn ($m) => $m <= 120)->count();
-        $de2a4 = $filas->filter(fn ($m) => $m > 120 && $m <= 240)->count();
+        $total = (int) $bandas->total;
+        $hasta2 = (int) $bandas->hasta2;
+        $de2a4 = (int) $bandas->de2a4;
         $mas4 = $total - $hasta2 - $de2a4;
 
         $pct = fn (int $n) => $total > 0 ? (int) round(($n / $total) * 100) : 0;
