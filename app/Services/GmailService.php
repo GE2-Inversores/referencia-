@@ -225,14 +225,26 @@ class GmailService
 
             $uid = (int) str_replace('imap-', '', (string) $mensaje->gmail_id);
             $remoto = $this->imapMailbox()->inbox()->messages()->find($uid);
-            $parte = $remoto ? ($this->partesAdjuntasImap($remoto)[$indice] ?? null) : null;
 
-            if (! $remoto || ! $parte) {
+            if (! $remoto) {
+                return null;
+            }
+
+            $meta = ($mensaje->adjuntos ?? [])[$indice] ?? null;
+            $partes = $this->partesAdjuntasImap($remoto);
+
+            // Con número de parte guardado la referencia es exacta; sin él
+            // (correos viejos sin reparar) se cae al índice de la lista.
+            $parte = isset($meta['parte'])
+                ? collect($partes)->first(fn (BodyStructurePart $p): bool => $p->partNumber() === $meta['parte'])
+                : ($partes[$indice] ?? null);
+
+            if (! $parte) {
                 return null;
             }
 
             return [
-                'nombre' => ($mensaje->adjuntos ?? [])[$indice]['nombre']
+                'nombre' => $meta['nombre']
                     ?? $this->nombreAdjuntoImap($parte->filename(), $parte->contentType(), $indice + 1),
                 'tipo' => $parte->contentType() ?: 'application/octet-stream',
                 'contenido' => (string) (BodyPartDecoder::binary($parte, $remoto->bodyPart($parte->partNumber())) ?? ''),
@@ -249,19 +261,37 @@ class GmailService
      */
     public function refrescarAdjuntos(InboxMensaje $mensaje): void
     {
-        if (! $mensaje->tiene_adjuntos || ! $this->esImap() || ! str_starts_with((string) $mensaje->gmail_id, 'imap-')) {
+        if (! $mensaje->tiene_adjuntos || ! $this->configurado()) {
             return;
         }
 
         try {
-            $uid = (int) str_replace('imap-', '', (string) $mensaje->gmail_id);
-            $remoto = $this->imapMailbox()->inbox()->messages()->find($uid);
+            if ($this->esImap()) {
+                if (! str_starts_with((string) $mensaje->gmail_id, 'imap-')) {
+                    return;
+                }
 
-            if (! $remoto) {
-                return;
+                $uid = (int) str_replace('imap-', '', (string) $mensaje->gmail_id);
+                $remoto = $this->imapMailbox()->inbox()->messages()->find($uid);
+
+                if (! $remoto) {
+                    return;
+                }
+
+                $adjuntos = $this->metaAdjuntosImap($remoto);
+            } else {
+                // En modo cuenta de servicio se repara con la API: la lista
+                // sale del mismo filtro que usa la descarga, así quedan
+                // alineados los chips con los índices.
+                if (str_starts_with((string) $mensaje->gmail_id, 'imap-')) {
+                    return;
+                }
+
+                $remoto = $this->gmail()->users_messages->get('me', $mensaje->gmail_id, ['format' => 'full']);
+                [, , $adjuntos] = $this->extraerCuerpo($remoto->getPayload());
+                $adjuntos = array_map(fn (array $a): array => $a + ['parte' => null], $adjuntos);
             }
 
-            $adjuntos = $this->metaAdjuntosImap($remoto);
             $mensaje->update(['adjuntos' => $adjuntos !== [] ? $adjuntos : null, 'tiene_adjuntos' => $adjuntos !== []]);
         } catch (Throwable) {
             // Si el buzón no responde se queda la metadata vieja — no es grave.
