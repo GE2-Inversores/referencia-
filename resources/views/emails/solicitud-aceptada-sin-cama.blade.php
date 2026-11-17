@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Solicitud aceptada</title>
+  <title>Solicitud pendiente de cupo</title>
 </head>
 <body style="margin:0;padding:0;background:#eef2f7;font-family:Arial,Helvetica,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f7;padding:32px 0;">
@@ -22,14 +22,14 @@
 
           <!-- Héroe de estado -->
           <tr>
-            <td style="background:#f0fdf4;padding:26px 40px;text-align:center;border-bottom:3px solid #16a34a;">
+            <td style="background:#fffbeb;padding:26px 40px;text-align:center;border-bottom:3px solid #f59e0b;">
               <table cellpadding="0" cellspacing="0" align="center" style="margin:0 auto 10px;">
                 <tr>
-                  <td style="width:44px;height:44px;background:#16a34a;border-radius:50%;text-align:center;vertical-align:middle;font-size:22px;color:#ffffff;font-weight:bold;">✓</td>
+                  <td style="width:44px;height:44px;background:#f59e0b;border-radius:50%;text-align:center;vertical-align:middle;font-size:22px;color:#ffffff;font-weight:bold;">◷</td>
                 </tr>
               </table>
-              <p style="margin:0;font-size:20px;font-weight:bold;color:#15803d;letter-spacing:0.5px;">SOLICITUD ACEPTADA</p>
-              <p style="margin:6px 0 0;font-size:14px;color:#166534;">
+              <p style="margin:0;font-size:20px;font-weight:bold;color:#b45309;letter-spacing:0.5px;">SOLICITUD PENDIENTE POR DISPONIBILIDAD DE CUPO</p>
+              <p style="margin:6px 0 0;font-size:14px;color:#92400e;">
                 {{ $solicitud->primer_nombre }} {{ $solicitud->segundo_nombre }} {{ $solicitud->primer_apellido }} {{ $solicitud->segundo_apellido }} — {{ $solicitud->especialidad_requerida }}
               </p>
             </td>
@@ -43,7 +43,7 @@
                   <td style="padding:18px 24px;text-align:center;">
                     <p style="margin:0 0 4px;font-size:11px;font-weight:bold;color:#b45309;text-transform:uppercase;letter-spacing:1px;">En espera de cupo</p>
                     <p style="margin:0;font-size:14px;color:#92400e;line-height:1.6;">
-                      La solicitud fue aceptada y quedó en espera de disponibilidad de cama.
+                      La solicitud fue recibida y quedó en espera de disponibilidad de cama.
                       <strong>Le enviaremos el código de aceptación en cuanto haya cupo disponible.</strong>
                     </p>
                   </td>
@@ -57,7 +57,7 @@
             <td style="padding:26px 40px 36px;">
               <p style="margin:0 0 20px;font-size:14px;color:#475569;line-height:1.7;">
                 Estimados representantes de <strong>{{ $solicitud->clinica->nombre ?? $solicitud->institucion_remitente ?? 'la institución remitente' }}</strong>,
-                nos permitimos informar que la solicitud de referencia fue <strong style="color:#15803d;">aceptada</strong> por nuestra institución.
+                nos permitimos informar que la solicitud de referencia fue <strong style="color:#b45309;">recibida</strong> y quedó en espera de disponibilidad de cama en nuestra institución.
               </p>
 
               <!-- Datos del paciente -->
@@ -83,7 +83,7 @@
                 </tr>
                 <tr style="background:#f8fafc;">
                   <td style="padding:10px 16px;font-size:13px;color:#64748b;">Estado de la solicitud</td>
-                  <td style="padding:10px 16px;font-size:13px;color:#b45309;font-weight:700;">ACEPTADA — en espera de cupo</td>
+                  <td style="padding:10px 16px;font-size:13px;color:#b45309;font-weight:700;">PENDIENTE — disponibilidad de cupo</td>
                 </tr>
               </table>
 

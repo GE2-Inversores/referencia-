@@ -117,8 +117,8 @@ class SolicitudReferenciaController extends Controller
             SolicitudReferenciaEvento::create([
                 'solicitud_referencia_id' => $solicitud->id,
                 'tipo' => 'pendiente_cama',
-                'titulo' => 'Aceptada — en espera de cupo',
-                'descripcion' => 'La solicitud fue aceptada y quedó en espera de cupo; el código se enviará cuando haya disponibilidad.',
+                'titulo' => 'Pendiente — disponibilidad de cupo',
+                'descripcion' => 'La solicitud quedó en espera de cupo; el código se enviará cuando haya disponibilidad.',
             ]);
 
             if ($destinatarios !== []) {
@@ -127,7 +127,7 @@ class SolicitudReferenciaController extends Controller
                     ['solicitud' => $solicitud],
                     function ($message) use ($solicitud, $destinatarios) {
                         $this->aplicarReplyTo($message->to($destinatarios))
-                            ->subject("Solicitud de referencia ACEPTADA - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
+                            ->subject("Solicitud de referencia pendiente de cupo - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                     }
                 );
             }
@@ -136,12 +136,12 @@ class SolicitudReferenciaController extends Controller
 
             $this->notificarClinica(
                 $solicitud,
-                'Solicitud aceptada',
-                "La solicitud de {$solicitud->primer_nombre} {$solicitud->primer_apellido} fue aceptada y quedó en espera de cupo. Le estaremos enviando el código cuando haya disponibilidad.",
-                'success',
+                'Solicitud pendiente de cupo',
+                "La solicitud de {$solicitud->primer_nombre} {$solicitud->primer_apellido} quedó pendiente de disponibilidad de cupo. Le estaremos enviando el código cuando haya disponibilidad.",
+                'warning',
             );
 
-            return response()->json(['data' => $solicitud, 'message' => 'Solicitud aceptada: en espera de cupo']);
+            return response()->json(['data' => $solicitud, 'message' => 'Solicitud pendiente por disponibilidad de cupo']);
         }
 
         // Aceptar y marcar en espera de llegada son un solo paso — no existe
