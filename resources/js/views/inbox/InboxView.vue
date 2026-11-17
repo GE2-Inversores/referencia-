@@ -96,9 +96,11 @@
               <p><strong>Para:</strong> {{ seleccionado.para }}</p>
               <time>{{ fechaLarga(seleccionado.recibido_en) }}</time>
               <div v-if="seleccionado.adjuntos?.length" class="inbx-adjuntos">
-                <span v-for="a in seleccionado.adjuntos" :key="a.nombre" class="inbx-adjunto">
-                  <component :is="ClipIcon" class="w-3 h-3" /> {{ a.nombre }} <em>({{ tamano(a.tamano) }})</em>
-                </span>
+                <a v-for="(a, i) in seleccionado.adjuntos" :key="i" class="inbx-adjunto"
+                  :href="`/api/inbox/${seleccionado.id}/adjunto/${i}`" target="_blank"
+                  :title="`Abrir ${a.nombre}`">
+                  <component :is="ClipIcon" class="w-3 h-3" /> {{ a.nombre }} <em v-if="a.tamano">({{ tamano(a.tamano) }})</em>
+                </a>
               </div>
             </header>
             <div v-if="seleccionado.gestion === 'negada'" class="inbx-rad inbx-rad--neg">
@@ -1462,7 +1464,8 @@ onUnmounted(() => window.clearInterval(temporizador));
 .dark .inbx-reader-head p { color: #cbd5e1; }
 .inbx-reader-head time { color: #94a3b8; font-size: 11px; font-weight: 600; }
 .inbx-adjuntos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.inbx-adjunto { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border: 1px solid #c3d6f2; border-radius: 999px; background: #f4f8ff; color: #315583; font-size: 11px; font-weight: 600; }
+.inbx-adjunto { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border: 1px solid #c3d6f2; border-radius: 999px; background: #f4f8ff; color: #315583; font-size: 11px; font-weight: 600; text-decoration: none; cursor: pointer; }
+.inbx-adjunto:hover { background: #e3edfc; border-color: #9db9e8; color: #1e3f73; }
 .dark .inbx-adjunto { border-color: #2c3f5e; background: #1a2233; color: #9db8e0; }
 .inbx-adjunto em { color: #94a3b8; font-style: normal; }
 .inbx-texto { flex: 1; overflow: auto; margin: 0; padding: 16px; color: #1e293b; font-family: inherit; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }

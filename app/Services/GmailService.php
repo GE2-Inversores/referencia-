@@ -6,9 +6,11 @@ use App\Models\InboxMensaje;
 use App\Models\Notification;
 use App\Models\Setting;
 use App\Models\User;
+use DirectoryTree\ImapEngine\BodyStructurePart;
 use DirectoryTree\ImapEngine\Mailbox;
 use DirectoryTree\ImapEngine\MessageInterface as ImapMessage;
 use DirectoryTree\ImapEngine\MessageQueryInterface;
+use DirectoryTree\ImapEngine\Support\BodyPartDecoder;
 use Google\Client;
 use Google\Service\Gmail;
 use Google\Service\Gmail\Message;
@@ -19,6 +21,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use RuntimeException;
+use Symfony\Component\Mime\MimeTypes;
 use Throwable;
 
 class GmailService
@@ -189,13 +192,130 @@ class GmailService
             return [];
         }
 
-        // attachments(true) pereza-descarga cada parte del mensaje — con
-        // attachments() solo se lee la estructura ya traída y sale vacío.
-        return array_map(fn ($adjunto): array => [
-            'nombre' => $adjunto->filename() ?: 'adjunto',
-            'tipo' => (string) $adjunto->contentType(),
-            'contenido' => $adjunto->contents(),
-        ], $remoto->attachments(true));
+        $meta = $mensaje->adjuntos ?? [];
+        $adjuntos = [];
+
+        foreach ($this->partesAdjuntasImap($remoto) as $i => $parte) {
+            $adjuntos[] = [
+                'nombre' => $meta[$i]['nombre'] ?? $this->nombreAdjuntoImap($parte->filename(), $parte->contentType(), $i + 1),
+                'tipo' => $parte->contentType(),
+                'contenido' => (string) (BodyPartDecoder::binary($parte, $remoto->bodyPart($parte->partNumber())) ?? ''),
+            ];
+        }
+
+        return $adjuntos;
+    }
+
+    /**
+     * Un solo adjunto del correo (por índice de la lista guardada) — para
+     * abrirlo o descargarlo desde la Bandeja sin radicar la solicitud.
+     *
+     * @return array{nombre: string, tipo: string, contenido: string}|null
+     */
+    public function descargarAdjunto(InboxMensaje $mensaje, int $indice): ?array
+    {
+        if (! $this->configurado()) {
+            return null;
+        }
+
+        try {
+            if (! $this->esImap()) {
+                return $this->adjuntosGoogle($mensaje)[$indice] ?? null;
+            }
+
+            $uid = (int) str_replace('imap-', '', (string) $mensaje->gmail_id);
+            $remoto = $this->imapMailbox()->inbox()->messages()->find($uid);
+            $parte = $remoto ? ($this->partesAdjuntasImap($remoto)[$indice] ?? null) : null;
+
+            if (! $remoto || ! $parte) {
+                return null;
+            }
+
+            return [
+                'nombre' => ($mensaje->adjuntos ?? [])[$indice]['nombre']
+                    ?? $this->nombreAdjuntoImap($parte->filename(), $parte->contentType(), $indice + 1),
+                'tipo' => $parte->contentType() ?: 'application/octet-stream',
+                'contenido' => (string) (BodyPartDecoder::binary($parte, $remoto->bodyPart($parte->partNumber())) ?? ''),
+            ];
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * Repara la metadata de adjuntos guardada por la versión vieja (nombres
+     * genéricos "noname"/"adjunto" y tamaño 0) leyendo el BODYSTRUCTURE del
+     * buzón — liviano, no descarga el contenido.
+     */
+    public function refrescarAdjuntos(InboxMensaje $mensaje): void
+    {
+        if (! $mensaje->tiene_adjuntos || ! $this->esImap() || ! str_starts_with((string) $mensaje->gmail_id, 'imap-')) {
+            return;
+        }
+
+        try {
+            $uid = (int) str_replace('imap-', '', (string) $mensaje->gmail_id);
+            $remoto = $this->imapMailbox()->inbox()->messages()->find($uid);
+
+            if (! $remoto) {
+                return;
+            }
+
+            $adjuntos = $this->metaAdjuntosImap($remoto);
+            $mensaje->update(['adjuntos' => $adjuntos !== [] ? $adjuntos : null, 'tiene_adjuntos' => $adjuntos !== []]);
+        } catch (Throwable) {
+            // Si el buzón no responde se queda la metadata vieja — no es grave.
+        }
+    }
+
+    /**
+     * Partes del correo que son adjuntos de verdad según el BODYSTRUCTURE
+     * del buzón (nombre, tipo y tamaño declarado) — sin descargar contenido.
+     *
+     * @return array<int, BodyStructurePart>
+     */
+    private function partesAdjuntasImap(ImapMessage $mensaje): array
+    {
+        return array_values($mensaje->bodyStructure(true)?->attachments() ?? []);
+    }
+
+    /**
+     * Metadata de los adjuntos para guardar en la fila: el número de parte
+     * ("2", "3.1") queda como referencia estable para descargarlo después.
+     *
+     * @return array<int, array{nombre: string, tipo: string, tamano: int, parte: string}>
+     */
+    private function metaAdjuntosImap(ImapMessage $mensaje): array
+    {
+        $adjuntos = [];
+
+        foreach ($this->partesAdjuntasImap($mensaje) as $i => $parte) {
+            $adjuntos[] = [
+                'nombre' => $this->nombreAdjuntoImap($parte->filename(), $parte->contentType(), $i + 1),
+                'tipo' => (string) $parte->contentType(),
+                'tamano' => (int) ($parte->size() ?? 0),
+                'parte' => $parte->partNumber(),
+            ];
+        }
+
+        return $adjuntos;
+    }
+
+    /**
+     * Algunos buzones adjuntan partes llamadas literalmente "noname" o sin
+     * nombre: se les genera "adjunto-N.ext" según su tipo MIME.
+     */
+    private function nombreAdjuntoImap(?string $archivo, string $tipo, int $indice): string
+    {
+        $archivo = trim((string) $archivo);
+
+        if ($archivo !== '' && strtolower($archivo) !== 'noname') {
+            return $archivo;
+        }
+
+        $ext = MimeTypes::getDefault()->getExtensions($tipo)[0] ?? null;
+
+        return 'adjunto-'.$indice.($ext ? '.'.$ext : '');
     }
 
     /**
@@ -710,11 +830,7 @@ class GmailService
             $texto = $this->htmlATexto($html);
         }
 
-        $adjuntos = array_map(fn ($adjunto): array => [
-            'nombre' => $adjunto->filename() ?: 'adjunto',
-            'tipo' => $adjunto->contentType(),
-            'tamano' => (int) ($adjunto->contentStream()->getSize() ?? 0),
-        ], $mensaje->attachments());
+        $adjuntos = $this->metaAdjuntosImap($mensaje);
 
         $baseSnippet = $html !== null ? $this->htmlATexto($html) : trim((string) preg_replace('/\s+/', ' ', (string) $texto));
 

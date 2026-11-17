@@ -13,6 +13,7 @@ use App\Services\GmailService;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
@@ -144,15 +145,38 @@ class InboxController extends Controller
         ]);
     }
 
-    public function show(InboxMensaje $mensaje): JsonResponse
+    public function show(InboxMensaje $mensaje, GmailService $gmail): JsonResponse
     {
         if (! $mensaje->leido) {
             $mensaje->update(['leido' => true]);
         }
 
+        // Los correos viejos guardaron adjuntos con nombres genéricos y
+        // tamaño 0: al abrirlos se repara la metadata desde el buzón una
+        // sola vez (los nuevos ya traen el número de parte).
+        if ($mensaje->tiene_adjuntos && ! array_key_exists('parte', $mensaje->adjuntos[0] ?? [])) {
+            $gmail->refrescarAdjuntos($mensaje);
+            $mensaje->refresh();
+        }
+
         $mensaje->load(['solicitud:id,inbox_mensaje_id,estado,nombre_quien_responde,created_at']);
 
         return response()->json(['data' => $mensaje]);
+    }
+
+    /**
+     * Descarga un adjunto del correo directo del buzón — para revisar la
+     * historia clínica sin tener que radicar primero la solicitud.
+     */
+    public function adjunto(InboxMensaje $mensaje, int $indice, GmailService $gmail): Response
+    {
+        $adjunto = $gmail->descargarAdjunto($mensaje, $indice);
+        abort_unless($adjunto, 404);
+
+        return response($adjunto['contenido'], 200, [
+            'Content-Type' => $adjunto['tipo'] ?: 'application/octet-stream',
+            'Content-Disposition' => "inline; filename*=UTF-8''".rawurlencode((string) $adjunto['nombre']),
+        ]);
     }
 
     public function noLeidos(): JsonResponse

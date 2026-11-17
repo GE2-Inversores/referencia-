@@ -528,4 +528,20 @@ class InboxTest extends TestCase
 
         $this->assertNull($correo->fresh()->gestion);
     }
+
+    public function test_descargar_adjunto_da_404_sin_buzon_o_sin_adjunto(): void
+    {
+        $correo = $this->correo(['tiene_adjuntos' => true, 'adjuntos' => [['nombre' => 'hc.pdf', 'tipo' => 'application/pdf', 'tamano' => 100, 'parte' => '2']]]);
+
+        // Sin Gmail configurado el adjunto no se puede traer del buzón.
+        $staff = $this->staff();
+
+        $this->actingAs($staff)
+            ->get("/api/inbox/{$correo->id}/adjunto/0")
+            ->assertNotFound();
+
+        $this->actingAs($staff)
+            ->get("/api/inbox/{$correo->id}/adjunto/5")
+            ->assertNotFound();
+    }
 }
