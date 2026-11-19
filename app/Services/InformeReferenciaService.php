@@ -474,6 +474,7 @@ class InformeReferenciaService
                     'completadas' => $delDia->where('estado', 'completado')->count(),
                     'negadas' => $delDia->where('estado', 'negado')->count(),
                     'canceladas' => $delDia->where('estado', 'cancelado')->count(),
+                    'no_efectivos' => $delDia->where('estado', 'negado')->filter(fn (SolicitudReferencia $s): bool => filled($s->motivo_no_ingreso))->count(),
                 ];
             })
             ->values()

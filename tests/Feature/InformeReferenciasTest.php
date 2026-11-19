@@ -223,6 +223,21 @@ class InformeReferenciasTest extends TestCase
             ->assertJsonPath('data.resumen.total', 1);
     }
 
+    public function test_daily_series_counts_non_effective_admissions(): void
+    {
+        $this->solicitud('negado', '2026-11-02', ['motivo_no_ingreso' => 'Alta Voluntaria', 'motivo_negacion' => 'No ingreso: Alta Voluntaria']);
+        $this->solicitud('negado', '2026-11-02', ['motivo_negacion' => 'Sin cupo', 'grupo_negacion' => 'no_red']);
+        $this->solicitud('completado', '2026-11-02');
+
+        $respuesta = $this->actingAs($this->staff())
+            ->getJson('/api/informes?desde=2026-11-01&hasta=2026-11-03')
+            ->assertOk();
+
+        $dia = collect($respuesta->json('data.por_dia'))->firstWhere('fecha', '2026-11-02');
+        $this->assertSame(1, $dia['no_efectivos']);
+        $this->assertSame(2, $dia['negadas']);
+    }
+
     public function test_response_time_uses_the_request_and_answer_hours(): void
     {
         $this->solicitud('completado', atributos: ['hora' => '09:00', 'hora_respuesta' => '09:30']);

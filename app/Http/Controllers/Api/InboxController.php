@@ -175,7 +175,7 @@ class InboxController extends Controller
     public function adjunto(InboxMensaje $mensaje, int $indice, GmailService $gmail): Response
     {
         $adjunto = $gmail->descargarAdjunto($mensaje, $indice);
-        abort_unless($adjunto, 404);
+        abort_unless($adjunto, 404, 'No se pudo descargar el adjunto: el correo ya no está en el buzón o el servicio de correo no responde.');
 
         return response($adjunto['contenido'], 200, [
             'Content-Type' => $adjunto['tipo'] ?: 'application/octet-stream',

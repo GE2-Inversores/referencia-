@@ -147,7 +147,9 @@ class GmailService
             return $this->esImap()
                 ? $this->adjuntosImap($mensaje)
                 : $this->adjuntosGoogle($mensaje);
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            Log::warning('Bandeja: no se pudieron descargar los adjuntos del correo.', ['mensaje' => $mensaje->id, 'error' => $e->getMessage()]);
+
             return [];
         }
     }
@@ -191,8 +193,7 @@ class GmailService
      */
     private function adjuntosImap(InboxMensaje $mensaje): array
     {
-        $uid = (int) str_replace('imap-', '', (string) $mensaje->gmail_id);
-        $remoto = $this->imapMailbox()->inbox()->messages()->find($uid);
+        $remoto = $this->encontrarRemotoImap($mensaje);
 
         if (! $remoto) {
             return [];
@@ -226,13 +227,20 @@ class GmailService
 
         try {
             if (! $this->esImap()) {
+                if (str_starts_with((string) $mensaje->gmail_id, 'imap-')) {
+                    Log::warning('Bandeja: el correo se sincronizó por IMAP pero el modo actual es cuenta de servicio.', ['mensaje' => $mensaje->id]);
+
+                    return null;
+                }
+
                 return $this->adjuntosGoogle($mensaje)[$indice] ?? null;
             }
 
-            $uid = (int) str_replace('imap-', '', (string) $mensaje->gmail_id);
-            $remoto = $this->imapMailbox()->inbox()->messages()->find($uid);
+            $remoto = $this->encontrarRemotoImap($mensaje);
 
             if (! $remoto) {
+                Log::info('Bandeja: el correo no se encontró en el buzón al abrir el adjunto.', ['mensaje' => $mensaje->id, 'indice' => $indice]);
+
                 return null;
             }
 
@@ -255,9 +263,58 @@ class GmailService
                 'tipo' => $parte->contentType() ?: 'application/octet-stream',
                 'contenido' => (string) (BodyPartDecoder::binary($parte, $remoto->bodyPart($parte->partNumber())) ?? ''),
             ];
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            Log::warning('Bandeja: no se pudo descargar el adjunto.', [
+                'mensaje' => $mensaje->id,
+                'indice' => $indice,
+                'modo' => $this->esImap() ? 'imap' : 'servicio',
+                'error' => $e->getMessage(),
+            ]);
+
             return null;
         }
+    }
+
+    /**
+     * Busca el correo en el buzón para bajar algo de él (adjuntos, metadata):
+     * primero en INBOX y, si no aparece, en la carpeta "Todos" — en Gmail el
+     * UID es el mismo en todas las carpetas, así un correo archivado o movido
+     * fuera de la entrada sigue siendo accesible.
+     */
+    private function encontrarRemotoImap(InboxMensaje $mensaje): ?ImapMessage
+    {
+        if (! str_starts_with((string) $mensaje->gmail_id, 'imap-')) {
+            return null;
+        }
+
+        $uid = (int) str_replace('imap-', '', (string) $mensaje->gmail_id);
+        $mailbox = $this->imapMailbox();
+        $remoto = $mailbox->inbox()->messages()->find($uid);
+
+        return $remoto ?? $this->carpetaTodos($mailbox)?->messages()->find($uid);
+    }
+
+    /**
+     * La carpeta "Todos" del buzón: por la marca \All o por el nombre que usa
+     * Gmail (inglés o español).
+     */
+    private function carpetaTodos(Mailbox $mailbox): ?FolderInterface
+    {
+        $carpetas = $mailbox->folders()->get();
+
+        foreach ($carpetas as $carpeta) {
+            if (in_array('\\All', $carpeta->flags(), true)) {
+                return $carpeta;
+            }
+        }
+
+        foreach ($carpetas as $carpeta) {
+            if (in_array($carpeta->path(), ['[Gmail]/All Mail', '[Gmail]/Todos'], true)) {
+                return $carpeta;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -273,12 +330,7 @@ class GmailService
 
         try {
             if ($this->esImap()) {
-                if (! str_starts_with((string) $mensaje->gmail_id, 'imap-')) {
-                    return;
-                }
-
-                $uid = (int) str_replace('imap-', '', (string) $mensaje->gmail_id);
-                $remoto = $this->imapMailbox()->inbox()->messages()->find($uid);
+                $remoto = $this->encontrarRemotoImap($mensaje);
 
                 if (! $remoto) {
                     return;

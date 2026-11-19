@@ -30,6 +30,13 @@
           :comparacion="textoVariacion(informe.resumen.canceladas, informe.anterior.canceladas, 'menos-es-mejor')"
           :icon="HourglassIcon" :sparkline="serie('canceladas')"
         />
+        <StatCard
+          variant="pastel" tone="violet" solid-icon
+          label="Tiempo de respuesta" :value="formatearMinutos(informe.tiempo_respuesta.promedio_min)"
+          :delta="'mediana ' + formatearMinutos(informe.tiempo_respuesta.mediana_min)"
+          :comparacion="comparacionTiempo"
+          :icon="TimerIcon"
+        />
       </div>
 
       <!-- ── Seguimiento diario ── -->
@@ -186,6 +193,42 @@
         </section>
       </div>
 
+      <!-- ── Ingresos y origen ── -->
+      <div class="inf-duo">
+        <section class="inf-panel inf-t-blue">
+          <header class="inf-head-panel">
+            <span class="inf-panel-icon"><component :is="ChartIcon" class="w-3.5 h-3.5" /></span>
+            <h2>Ingresos efectivos vs. no efectivos <small class="inf-head-note">({{ serieIngresos.porDia ? 'diario' : 'mensual' }})</small></h2>
+            <ul class="inf-chips"><li v-for="l in LEYENDA_INGRESOS" :key="l.name"><i :style="{ background: l.color }"></i>{{ l.name }}</li></ul>
+          </header>
+          <div class="inf-chart">
+            <apexchart :key="'ingresos-' + (layout.isDarkMode ? 'd' : 'l')" type="bar" height="100%" width="100%" :options="opcionesIngresos" :series="seriesIngresos" />
+          </div>
+        </section>
+
+        <section class="inf-panel inf-t-amber">
+          <header class="inf-head-panel">
+            <span class="inf-panel-icon"><component :is="MailIcon" class="w-3.5 h-3.5" /></span>
+            <h2>Origen de la solicitud</h2>
+          </header>
+          <div v-if="origenTotal > 0" class="inf-origen">
+            <div class="inf-origen-donut">
+              <apexchart :key="'origen-' + (layout.isDarkMode ? 'd' : 'l')" type="donut" height="100%" width="100%" :options="opcionesOrigen" :series="origenFilas.map(o => o.total)" />
+            </div>
+            <ul class="inf-origen-list">
+              <li v-for="o in origenFilas" :key="o.nombre">
+                <span class="inf-origen-icon" :style="{ color: o.color, background: o.color + '1f' }"><component :is="o.icono" class="w-3.5 h-3.5" /></span>
+                <div class="inf-origen-body">
+                  <div class="inf-origen-top"><strong>{{ o.nombre }}</strong><span>{{ o.total }} <small>{{ fmtPct(o.pct) }}</small></span></div>
+                  <span class="inf-bar"><span :style="{ width: Math.max(o.pct, 2) + '%', background: o.color }"></span></span>
+                </div>
+              </li>
+            </ul>
+          </div>
+          <p v-else class="inf-empty">Sin registros en el período.</p>
+        </section>
+      </div>
+
       <!-- ── Especialidad que referencia ── -->
       <section class="inf-panel inf-t-indigo">
         <header class="inf-head-panel">
@@ -209,9 +252,11 @@ import { computed, onMounted, ref, watch, type Component } from 'vue';
 import {
   Ban as BanIcon,
   Building2 as BuildingIcon,
+  ChartColumn as ChartIcon,
   Hourglass as HourglassIcon,
   MapPin as MapPinIcon,
   Mail as MailIcon,
+  Monitor as MonitorIcon,
   Stethoscope as StethoscopeIcon,
   Users as UsersIcon,
   BedDouble as BedIcon,
@@ -222,6 +267,7 @@ import {
   PieChart as PieIcon,
   RefreshCw as RefreshIcon,
   ShieldCheck as ShieldIcon,
+  Timer as TimerIcon,
   UserX as UserXIcon,
   XCircle as XIcon,
 } from '@lucide/vue';
@@ -230,12 +276,12 @@ import StatCard from '@/components/ui/StatCard.vue';
 import http from '@/plugins/axios';
 import notify from '@/plugins/toast';
 import { useLayoutStore } from '@/stores/layout';
-import type { InformeDatos } from '@/lib/exportarInformePdf';
+import { formatearMinutos, type InformeDatos } from '@/lib/exportarInformePdf';
 
 interface InformeCompleto extends InformeDatos {
   por_estado: (InformeDatos['por_estado'][number] & { estado: string })[];
   grupos_negacion: (InformeDatos['grupos_negacion'][number] & { grupo: string })[];
-  por_dia: { fecha: string; recibidas: number; aceptadas: number; completadas: number; negadas: number; canceladas: number }[];
+  por_dia: { fecha: string; recibidas: number; aceptadas: number; completadas: number; negadas: number; canceladas: number; no_efectivos?: number }[];
   por_municipio: { nombre: string; total: number; aceptado: number; completadas: number; pct: number }[];
   poblacion: { objeto: number; no_red: number };
   motivos_poblacion: { motivo: string; total: number; pct: number }[];
@@ -357,12 +403,6 @@ const cuatroColumnas = computed(() => informe.value
         icono: BuildingIcon, iconoClase: 'inf-icon-blue', barClass: 'inf-bar-blue', pillClass: 'inf-cat-pill-blue',
         filas: informe.value.por_clinica.map((f) => ({ nombre: f.nombre, total: f.total, pct: pctDe(f.total, informe.value!.resumen.total) })),
       },
-      {
-        titulo: 'Origen de la solicitud',
-        tema: 'inf-t-blue',
-        icono: MailIcon, iconoClase: 'inf-icon-blue', barClass: 'inf-bar-blue', pillClass: 'inf-cat-pill-blue',
-        filas: (informe.value.por_origen ?? []).map((f) => ({ nombre: f.nombre, total: f.total, pct: pctDe(f.total, informe.value!.resumen.total) })),
-      },
     ]
   : []);
 
@@ -398,6 +438,12 @@ const tarjetasSeguimiento = computed(() => {
   ];
 });
 
+const comparacionTiempo = computed(() => {
+  const p = informe.value?.tiempo_respuesta.promedio_min;
+  if (p === null || p === undefined) return undefined;
+  return textoVariacion(p, informe.value?.anterior.tiempo_promedio_min ?? 0, 'menos-es-mejor');
+});
+
 const categorias = computed(() => CATEGORIAS.map((c) => ({
   ...c,
   total: informe.value?.resumen[c.key] ?? 0,
@@ -431,6 +477,94 @@ const opcionesDonut = computed(() => ({
   tooltip: { y: { formatter: (v: number) => `${v} solicitudes` } },
 }));
 
+// ── Ingresos efectivos vs. no efectivos (por mes, o por día en rangos cortos) ──
+const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+const LEYENDA_INGRESOS = [
+  { name: 'Ingresos efectivos', color: '#2563eb' },
+  { name: 'No efectivos', color: '#f43f5e' },
+];
+
+const serieIngresos = computed(() => {
+  const dias = informe.value?.por_dia ?? [];
+  const porDia = dias.length <= 62;
+  const varios = dias.length > 0 && dias[0].fecha.slice(0, 4) !== dias[dias.length - 1].fecha.slice(0, 4);
+  const grupos = new Map<string, { label: string; efectivos: number; noEfectivos: number }>();
+
+  for (const d of dias) {
+    const clave = porDia ? d.fecha : d.fecha.slice(0, 7);
+    let g = grupos.get(clave);
+    if (!g) {
+      const [anio, mes, dia] = d.fecha.split('-').map(Number);
+      const label = porDia ? `${dia} ${MESES[mes - 1]}` : `${MESES[mes - 1]}${varios ? ` ${String(anio).slice(2)}` : ''}`;
+      g = { label, efectivos: 0, noEfectivos: 0 };
+      grupos.set(clave, g);
+    }
+    g.efectivos += d.completadas;
+    g.noEfectivos += d.no_efectivos ?? 0;
+  }
+
+  return { porDia, filas: [...grupos.values()] };
+});
+
+const seriesIngresos = computed(() => [
+  { name: 'Ingresos efectivos', data: serieIngresos.value.filas.map((g) => g.efectivos) },
+  { name: 'No efectivos', data: serieIngresos.value.filas.map((g) => g.noEfectivos) },
+]);
+
+const textoGrafico = computed(() => (layout.isDarkMode ? '#94a3b8' : '#64748b'));
+const lineaGrafico = computed(() => (layout.isDarkMode ? '#263352' : '#e8eef7'));
+
+const opcionesIngresos = computed(() => ({
+  chart: { background: 'transparent', fontFamily: 'inherit', toolbar: { show: false } },
+  theme: { mode: layout.isDarkMode ? 'dark' : 'light' },
+  colors: ['#2563eb', '#f43f5e'],
+  fill: { type: 'gradient', gradient: { shade: 'light', type: 'vertical', opacityFrom: 0.98, opacityTo: 0.72, stops: [0, 100] } },
+  plotOptions: { bar: { columnWidth: '55%', borderRadius: 3, dataLabels: { position: 'top' } } },
+  dataLabels: { enabled: serieIngresos.value.filas.length <= 14, offsetY: -14, style: { fontSize: '9px', colors: [textoGrafico.value] } },
+  legend: { show: false },
+  xaxis: { categories: serieIngresos.value.filas.map((g) => g.label), labels: { style: { colors: textoGrafico.value, fontSize: '10px' }, rotate: 0, hideOverlappingLabels: true }, axisBorder: { show: false }, axisTicks: { show: false } },
+  yaxis: { min: 0, tickAmount: 4, labels: { style: { colors: textoGrafico.value, fontSize: '10px' }, formatter: (v: number) => String(Math.round(v)) } },
+  grid: { borderColor: lineaGrafico.value, strokeDashArray: 3, padding: { left: 4, right: 10 } },
+  tooltip: { shared: true, intersect: false },
+}));
+
+// ── Origen de la solicitud (dona) ──
+const COLORES_ORIGEN: Record<string, string> = { Aplicativo: '#2563eb', Correo: '#f59e0b' };
+
+const origenFilas = computed(() => (informe.value?.por_origen ?? []).map((f) => ({
+  nombre: f.nombre,
+  total: f.total,
+  pct: pctDe(f.total, informe.value?.resumen.total ?? 0),
+  color: COLORES_ORIGEN[f.nombre] ?? '#14b8a6',
+  icono: f.nombre === 'Correo' ? MailIcon : MonitorIcon,
+})));
+
+const origenTotal = computed(() => origenFilas.value.reduce((a, f) => a + f.total, 0));
+
+const opcionesOrigen = computed(() => ({
+  chart: { background: 'transparent', fontFamily: 'inherit' },
+  theme: { mode: layout.isDarkMode ? 'dark' : 'light' },
+  labels: origenFilas.value.map((f) => f.nombre),
+  colors: origenFilas.value.map((f) => f.color),
+  legend: { show: false },
+  dataLabels: { enabled: false },
+  stroke: { width: 2, colors: [layout.isDarkMode ? '#161b28' : '#ffffff'] },
+  plotOptions: {
+    pie: {
+      donut: {
+        size: '70%',
+        labels: {
+          show: true,
+          name: { show: false },
+          value: { fontSize: '16px', fontWeight: 800, offsetY: 4, color: layout.isDarkMode ? '#e2ecfc' : '#0d2d5e' },
+          total: { show: true, showAlways: true, label: 'Solicitudes', fontSize: '9px', color: '#94a3b8', formatter: () => String(origenTotal.value) },
+        },
+      },
+    },
+  },
+  tooltip: { y: { formatter: (v: number) => `${v} solicitudes` } },
+}));
+
 watch(rango, () => { void cargar(); });
 watch(rangoSeg, () => { void cargarSeg(); });
 onMounted(cargar);
@@ -453,7 +587,8 @@ onMounted(cargar);
 .inf-error { margin: 0 0 10px; padding: 10px 12px; border: 1px solid #fecaca; border-radius: 10px; background: #fef2f2; color: #b91c1c; font-size: 12px; }
 .inf-loading { padding: 60px 0; color: #64748b; text-align: center; font-size: 13px; }
 
-.inf-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-bottom: 6px; flex-shrink: 0; }
+.inf-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-bottom: 6px; flex-shrink: 0; }
+@media (max-width: 1500px) { .inf-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 1200px) { .inf-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 700px) { .inf-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
@@ -533,6 +668,38 @@ onMounted(cargar);
 @media (max-width: 1000px) { .inf-grid { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { .inf-hero, .inf-grid-4 { grid-template-columns: 1fr; } }
 
+/* ── Fila doble: barras de ingresos + dona de origen ── */
+.inf-duo { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 6px; margin-bottom: 6px; align-items: stretch; }
+.inf-duo > .inf-panel { margin-bottom: 0; }
+.inf-chart { position: relative; height: 160px; }
+.inf-head-note { color: #94a3b8; font-size: 9.5px; font-weight: 700; }
+.inf-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 1px 10px; margin: 0; padding: 0; list-style: none; }
+.inf-chips li { display: inline-flex; align-items: center; gap: 4px; color: #64748b; font-size: 9.5px; font-weight: 700; line-height: 1.3; white-space: nowrap; }
+.inf-chips i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.dark .inf-chips li { color: #93a5c0; }
+.inf-origen { display: flex; align-items: center; gap: 14px; }
+.inf-origen-donut { position: relative; flex: 0 0 120px; height: 118px; }
+.inf-origen-list { display: flex; flex: 1; flex-direction: column; gap: 10px; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.inf-origen-list li { display: flex; align-items: center; gap: 8px; }
+.inf-origen-icon { display: grid; width: 26px; height: 26px; flex-shrink: 0; place-items: center; border-radius: 8px; }
+.inf-origen-body { flex: 1; min-width: 0; }
+.inf-origen-top { display: flex; justify-content: space-between; margin-bottom: 4px; color: #0d2d5e; font-size: 11px; }
+.inf-origen-top span { color: #0d2d5e; font-weight: 800; }
+.inf-origen-top small { color: #64748b; font-weight: 700; }
+.dark .inf-origen-top, .dark .inf-origen-top span { color: #e2ecfc; }
+@media (max-width: 1000px) { .inf-duo { grid-template-columns: 1fr; } }
+
+/* ── Franja superior del color de cada panel ── */
+.inf-panel { --ac: #3b82f6; }
+.inf-panel::before { content: ''; position: absolute; top: 0; right: 0; left: 0; height: 3px; border-radius: 18px 18px 0 0; background: linear-gradient(90deg, var(--ac), color-mix(in srgb, var(--ac) 22%, transparent)); }
+.inf-t-indigo { --ac: #6366f1; }
+.inf-t-teal { --ac: #14b8a6; }
+.inf-t-purple { --ac: #8b5cf6; }
+.inf-t-green { --ac: #22c55e; }
+.inf-t-orange { --ac: #f97316; }
+.inf-t-blue { --ac: #3b82f6; }
+.inf-t-amber { --ac: #f59e0b; }
+.inf-t-amber .inf-panel-icon { background: linear-gradient(135deg, #fbbf24, #d97706); box-shadow: 0 4px 10px rgba(245,158,11,.3); }
 /* ── Paneles ── */
 .inf-panel { position: relative; overflow: hidden; margin-bottom: 6px; padding: 10px 12px 9px; border: 1px solid #86a5d8; border-radius: 18px; background: #ffffff; box-shadow: 0 8px 24px rgba(22,70,142,.18), inset 0 1px 0 rgba(255,255,255,.9); min-width: 0; transition: box-shadow .2s ease; }
 .inf-panel:hover { box-shadow: 0 12px 30px rgba(22,70,142,.22), inset 0 1px 0 rgba(255,255,255,.9); }
