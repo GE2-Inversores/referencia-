@@ -17,6 +17,7 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -32,18 +33,11 @@ class InboxController extends Controller
     {
         // Solo las columnas que muestra la lista: el cuerpo y los adjuntos se
         // cargan aparte al abrir el correo (ver show()).
-        $consulta = InboxMensaje::query()
-            ->select([
-                'id', 'gmail_id', 'remitente', 'remitente_email', 'para', 'asunto', 'snippet',
-                'tiene_adjuntos', 'recibido_en', 'leido',
-                'gestion', 'gestion_por', 'gestion_at', 'gestion_detalle', 'carpeta',
-            ])
-            ->with(['solicitud:id,inbox_mensaje_id,estado,nombre_quien_responde,created_at'])
-            ->latest('recibido_en');
+        $base = InboxMensaje::query();
 
         if ($request->filled('q')) {
             $texto = '%'.str_replace(['%', '_'], ['\%', '\_'], $request->string('q')).'%';
-            $consulta->where(function ($w) use ($texto): void {
+            $base->where(function ($w) use ($texto): void {
                 $w->where('asunto', 'like', $texto)
                     ->orWhere('remitente', 'like', $texto)
                     ->orWhere('remitente_email', 'like', $texto);
@@ -51,7 +45,7 @@ class InboxController extends Controller
         }
 
         if ($request->input('filtro') === 'no_leidos') {
-            $consulta->where('leido', false);
+            $base->where('leido', false);
         }
 
         // La vista por defecto es Entrada: correos sin carpeta. Al gestionar
@@ -59,10 +53,38 @@ class InboxController extends Controller
         // — solo se vuelve a ver dentro de esa carpeta.
         $carpeta = (string) $request->input('carpeta', 'entrada');
         if ($carpeta === 'entrada') {
-            $consulta->whereNull('carpeta');
+            $base->whereNull('carpeta');
         } else {
-            $consulta->where('carpeta', $carpeta);
+            $base->where('carpeta', $carpeta);
         }
+
+        // Vista de hilos: una fila por conversación con el mensaje más
+        // reciente del hilo dentro del filtro, el total de mensajes del hilo
+        // y cuántos quedan sin leer (contados en toda la bandeja).
+        $claveHilo = function (string $tabla): string {
+            $solo = InboxMensaje::query()->getModel()->getConnection()->getDriverName() === 'sqlite'
+                ? "('solo-' || {$tabla}.id)"
+                : "CONCAT('solo-', {$tabla}.id)";
+
+            return "COALESCE(NULLIF({$tabla}.thread_id, ''), {$solo})";
+        };
+
+        $grupos = (clone $base)
+            ->selectRaw('MAX(id) AS id')
+            ->groupByRaw($claveHilo('inbox_mensajes'));
+
+        $consulta = InboxMensaje::query()
+            ->select([
+                'id', 'gmail_id', 'remitente', 'remitente_email', 'para', 'asunto', 'snippet',
+                'tiene_adjuntos', 'recibido_en', 'leido',
+                'gestion', 'gestion_por', 'gestion_at', 'gestion_detalle', 'carpeta', 'etiquetas',
+                'contestado_at', 'contestado_por',
+            ])
+            ->selectRaw("(SELECT COUNT(*) FROM inbox_mensajes h WHERE {$claveHilo('h')} = {$claveHilo('inbox_mensajes')}) AS hilo_total")
+            ->selectRaw("(SELECT COUNT(*) FROM inbox_mensajes h WHERE h.leido = 0 AND {$claveHilo('h')} = {$claveHilo('inbox_mensajes')}) AS hilo_sin_leer")
+            ->whereIn('id', $grupos)
+            ->with(['solicitud:id,inbox_mensaje_id,estado,nombre_quien_responde,created_at'])
+            ->latest('recibido_en');
 
         $pagina = $consulta->paginate(30);
 
@@ -74,6 +96,7 @@ class InboxController extends Controller
                 'paginas' => $pagina->lastPage(),
                 'no_leidos' => InboxMensaje::where('leido', false)->whereNull('carpeta')->count(),
                 'carpetas' => $this->carpetas(),
+                'etiquetas' => $this->etiquetas(),
             ],
             'gmail' => [
                 'configurado' => $gmail->configurado(),
@@ -103,6 +126,53 @@ class InboxController extends Controller
             ->map(fn (string $nombre): array => ['nombre' => $nombre, 'total' => (int) ($conteos[$nombre] ?? 0)])
             ->values()
             ->all();
+    }
+
+    /**
+     * Las etiquetas personalizadas que ya se usan en la bandeja, para
+     * sugerirlas al marcar correos nuevos ("PACIENTES NO RED"…).
+     *
+     * @return array<int, string>
+     */
+    private function etiquetas(): array
+    {
+        return InboxMensaje::whereNotNull('etiquetas')
+            ->orderByDesc('id')
+            ->limit(2000)
+            ->get(['etiquetas'])
+            ->pluck('etiquetas')
+            ->flatten()
+            ->filter(fn ($e): bool => is_string($e) && ! InboxMensaje::esEtiquetaSistema($e))
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Deja en el correo, dentro del propio buzón de Gmail, las etiquetas
+     * personalizadas enviadas — el equivalente a marcarlo en Gmail.
+     */
+    public function etiquetasUpdate(Request $request, InboxMensaje $mensaje, GmailService $gmail): JsonResponse
+    {
+        $validated = $request->validate([
+            'etiquetas' => ['present', 'array', 'max:10'],
+            'etiquetas.*' => ['string', 'max:60'],
+        ]);
+
+        try {
+            $finales = $gmail->ponerEtiquetas($mensaje, $validated['etiquetas']);
+        } catch (Throwable $e) {
+            Log::warning('Bandeja: no se pudieron aplicar las etiquetas.', ['mensaje' => $mensaje->id, 'error' => $e->getMessage()]);
+
+            return response()->json(['message' => 'No se pudieron aplicar las etiquetas en el buzón. Intente de nuevo.'], 503);
+        }
+
+        return response()->json([
+            'data' => ['etiquetas' => $finales],
+            'etiquetas' => $this->etiquetas(),
+            'message' => 'Etiquetas actualizadas.',
+        ]);
     }
 
     private function nombreCarpeta(Request $request, string $defecto): string
@@ -163,9 +233,38 @@ class InboxController extends Controller
             $mensaje->refresh();
         }
 
+        // Los correos guardados antes del soporte de etiquetas solo tienen
+        // banderas IMAP: al abrirlos se traen sus etiquetas reales del buzón.
+        if ($mensaje->necesitaEtiquetas()) {
+            $gmail->refrescarEtiquetas($mensaje);
+            $mensaje->refresh();
+        }
+
         $mensaje->load(['solicitud:id,inbox_mensaje_id,estado,nombre_quien_responde,created_at']);
 
         return response()->json(['data' => $mensaje]);
+    }
+
+    /**
+     * Los mensajes de la misma conversación (mismo thread_id), del más viejo
+     * al más nuevo — la lista del lector para navegar el hilo completo.
+     */
+    public function hilo(InboxMensaje $mensaje): JsonResponse
+    {
+        if (! $mensaje->thread_id) {
+            return response()->json(['data' => []]);
+        }
+
+        $mensajes = $mensaje->hilo()
+            ->select([
+                'id', 'remitente', 'remitente_email', 'asunto', 'snippet',
+                'tiene_adjuntos', 'recibido_en', 'leido', 'gestion', 'carpeta',
+            ])
+            ->with(['solicitud:id,inbox_mensaje_id,estado,nombre_quien_responde,created_at'])
+            ->orderBy('recibido_en')
+            ->get();
+
+        return response()->json(['data' => $mensajes]);
     }
 
     /**
@@ -387,8 +486,8 @@ class InboxController extends Controller
         $validated = $request->validate([
             'eps' => ['required', 'string', 'max:120', $this->epsConContrato()],
             'grupo_negacion' => ['required', Rule::in(['no_red', 'poblacion_objeto'])],
-            'motivo_negacion' => ['required', 'string', 'max:250'],
-            'observaciones' => ['nullable', 'string', 'max:1000'],
+            'motivo_negacion' => ['required', 'string', 'max:1500'],
+            'observaciones' => ['nullable', 'string', 'max:2000'],
             'correos_extra' => ['nullable', 'array', 'max:10'],
             'correos_extra.*' => ['email', 'max:150'],
             'carpeta' => ['nullable', 'string', 'max:60'],
@@ -426,6 +525,7 @@ class InboxController extends Controller
                         $to->replyTo($replyTo, config('mail.saliente_reply_to_nombre'));
                     }
                     $to->subject('Re: '.($mensaje->asunto ?: 'Solicitud de referencia'));
+                    $mensaje->responderEnHilo($message);
                 }
             );
         } catch (Throwable) {
@@ -497,6 +597,7 @@ class InboxController extends Controller
                     function ($message) use ($mensaje): void {
                         $message->to($mensaje->remitente_email)
                             ->subject('Re: '.($mensaje->asunto ?: 'Su correo'));
+                        $mensaje->responderEnHilo($message);
                         if ($replyTo = config('mail.saliente_reply_to')) {
                             $message->replyTo($replyTo, config('mail.saliente_reply_to_nombre'));
                         }
@@ -519,6 +620,75 @@ class InboxController extends Controller
         return response()->json([
             'data' => $mensaje->fresh(),
             'message' => "Correo reenviado a {$para}".($avisar ? ' y aviso enviado al remitente.' : '.'),
+        ]);
+    }
+
+    /**
+     * Responde al remitente en el mismo hilo del correo, sin tocar la
+     * gestión: por directriz todo correo recibe contestación, haya o no
+     * solicitud que radicar. Queda quién contestó y cuándo.
+     */
+    public function responder(Request $request, InboxMensaje $mensaje): JsonResponse
+    {
+        if (! filled($mensaje->remitente_email)) {
+            return response()->json(['message' => 'Este correo no tiene una dirección de remitente a la que responder.'], 422);
+        }
+
+        $validated = $request->validate([
+            'cuerpo' => ['required', 'string', 'max:4000'],
+            'cc' => ['nullable', 'array', 'max:5'],
+            'cc.*' => ['email', 'max:150'],
+        ]);
+
+        $quienResponde = $this->nombreUsuario($request);
+        $copias = array_values(array_filter(array_map('trim', $validated['cc'] ?? [])));
+
+        try {
+            Mail::send(
+                'emails.inbox-respuesta',
+                [
+                    'mensaje' => $mensaje,
+                    'respuesta' => $validated['cuerpo'],
+                    'quienResponde' => $quienResponde,
+                ],
+                function ($message) use ($mensaje, $copias): void {
+                    $to = $message->to($mensaje->remitente_email);
+                    if ($copias !== []) {
+                        $to->cc($copias);
+                    }
+                    if ($replyTo = config('mail.saliente_reply_to')) {
+                        $to->replyTo($replyTo, config('mail.saliente_reply_to_nombre'));
+                    }
+                    $to->subject('Re: '.($mensaje->asunto ?: 'Su correo'));
+                    $mensaje->responderEnHilo($message);
+                }
+            );
+        } catch (Throwable) {
+            return response()->json(['message' => 'No se pudo enviar la respuesta. Intente de nuevo en unos minutos.'], 503);
+        }
+
+        $mensaje->update([
+            'contestado_at' => now(),
+            'contestado_por' => $quienResponde,
+            'contestado_detalle' => "Para: {$mensaje->remitente_email}"
+                .($copias !== [] ? ' · CC: '.implode(', ', $copias) : '')
+                ."\n".$validated['cuerpo'],
+        ]);
+
+        // Contestado = atendido: el hilo sale de la Entrada a «Contestados».
+        // Solo se mueven los mensajes sin carpeta — un radicado o negado
+        // conserva la suya. Al no tener gestión, la limpieza de medianoche
+        // los borra igual que cualquier otro pendiente.
+        $enEntrada = InboxMensaje::whereNull('carpeta');
+        filled($mensaje->thread_id)
+            ? $enEntrada->where('thread_id', $mensaje->thread_id)
+            : $enEntrada->where('id', $mensaje->id);
+        $enEntrada->update(['carpeta' => 'Contestados']);
+
+        return response()->json([
+            'data' => $mensaje->fresh(),
+            'carpetas' => $this->carpetas(),
+            'message' => 'Respuesta enviada a '.$mensaje->remitente_email.'.',
         ]);
     }
 

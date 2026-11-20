@@ -8,6 +8,8 @@ use App\Models\SolicitudReferencia;
 use App\Models\User;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Mail\Message;
+use Symfony\Component\Mime\Email;
 use Tests\TestCase;
 
 class InboxTest extends TestCase
@@ -25,7 +27,8 @@ class InboxTest extends TestCase
     {
         return InboxMensaje::create(array_merge([
             'gmail_id' => 'g'.uniqid(),
-            'thread_id' => 't1',
+            // Hilo propio por defecto: compartir thread_id los agrupa en la lista.
+            'thread_id' => 't'.uniqid(),
             'remitente' => 'EPS Salud <eps@example.com>',
             'remitente_email' => 'eps@example.com',
             'para' => 'referencia@cacsantabarbara.co',
@@ -65,6 +68,222 @@ class InboxTest extends TestCase
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.asunto', 'Sin leer');
+    }
+
+    public function test_agrupa_los_correos_del_mismo_hilo(): void
+    {
+        $this->correo(['asunto' => 'Primero del hilo', 'thread_id' => 'hilo-1', 'recibido_en' => now()->subHour(), 'leido' => true]);
+        $this->correo(['asunto' => 'Último del hilo', 'thread_id' => 'hilo-1', 'recibido_en' => now(), 'leido' => false]);
+        $this->correo(['asunto' => 'Otro correo', 'thread_id' => 'hilo-2', 'recibido_en' => now()->subHours(2)]);
+
+        $this->actingAs($this->staff())
+            ->getJson('/api/inbox')
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.asunto', 'Último del hilo')
+            ->assertJsonPath('data.0.hilo_total', 2)
+            ->assertJsonPath('data.0.hilo_sin_leer', 1)
+            ->assertJsonPath('data.1.hilo_total', 1);
+    }
+
+    public function test_hilo_sin_leer_aunque_el_ultimo_ya_este_leido(): void
+    {
+        $this->correo(['asunto' => 'Sin leer del hilo', 'thread_id' => 'hilo-1', 'recibido_en' => now()->subHour(), 'leido' => false]);
+        $this->correo(['asunto' => 'Último del hilo', 'thread_id' => 'hilo-1', 'recibido_en' => now(), 'leido' => true]);
+
+        $this->actingAs($this->staff())
+            ->getJson('/api/inbox')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.hilo_sin_leer', 1);
+    }
+
+    public function test_hilo_devuelve_los_mensajes_de_la_conversacion_en_orden(): void
+    {
+        $primero = $this->correo(['asunto' => 'Primero', 'thread_id' => 'hilo-1', 'recibido_en' => now()->subHour()]);
+        $this->correo(['asunto' => 'Segundo', 'thread_id' => 'hilo-1', 'recibido_en' => now()]);
+        $this->correo(['asunto' => 'Ajeno', 'thread_id' => 'hilo-2']);
+
+        $this->actingAs($this->staff())
+            ->getJson("/api/inbox/{$primero->id}/hilo")
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.asunto', 'Primero')
+            ->assertJsonPath('data.1.asunto', 'Segundo');
+    }
+
+    public function test_identificador_correo_normaliza_el_message_id(): void
+    {
+        $conCorchetes = new InboxMensaje(['message_id' => '<abc@eps.co>']);
+        $sinCorchetes = new InboxMensaje(['message_id' => 'abc@eps.co']);
+        // Las filas viejas no tienen message_id: su thread_id era el Message-ID recortado.
+        $vieja = new InboxMensaje(['thread_id' => '<abc@eps.co']);
+        $sinId = new InboxMensaje(['thread_id' => 'hilo-gmail-123']);
+
+        $this->assertSame('<abc@eps.co>', $conCorchetes->identificadorCorreo());
+        $this->assertSame('<abc@eps.co>', $sinCorchetes->identificadorCorreo());
+        $this->assertSame('<abc@eps.co', $vieja->identificadorCorreo());
+        $this->assertNull($sinId->identificadorCorreo());
+    }
+
+    public function test_responder_en_hilo_agrega_in_reply_to_y_references(): void
+    {
+        $mensaje = new InboxMensaje([
+            'message_id' => '<abc@eps.co>',
+            'referencias' => '<padre@eps.co>',
+        ]);
+
+        $correo = new Message(new Email);
+        $mensaje->responderEnHilo($correo);
+
+        $headers = $correo->getSymfonyMessage()->getHeaders();
+        $this->assertSame('<abc@eps.co>', $headers->get('In-Reply-To')?->getBodyAsString());
+        $this->assertSame('<padre@eps.co> <abc@eps.co>', $headers->get('References')?->getBodyAsString());
+    }
+
+    public function test_responder_en_hilo_sin_identificador_no_toca_encabezados(): void
+    {
+        $mensaje = new InboxMensaje(['thread_id' => 'hilo-gmail-123']);
+
+        $correo = new Message(new Email);
+        $mensaje->responderEnHilo($correo);
+
+        $headers = $correo->getSymfonyMessage()->getHeaders();
+        $this->assertNull($headers->get('In-Reply-To'));
+    }
+
+    public function test_lista_incluye_las_etiquetas_del_correo(): void
+    {
+        $this->correo(['etiquetas' => ['\\Inbox', 'PACIENTES NO RED']]);
+
+        $this->actingAs($this->staff())
+            ->getJson('/api/inbox')
+            ->assertOk()
+            ->assertJsonPath('data.0.etiquetas', ['\\Inbox', 'PACIENTES NO RED']);
+    }
+
+    public function test_meta_sugiere_solo_las_etiquetas_personalizadas(): void
+    {
+        $this->correo(['etiquetas' => ['\\Inbox', 'PACIENTES NO RED']]);
+        $this->correo(['etiquetas' => ['UNREAD', 'Población objeto', 'INBOX']]);
+
+        $this->actingAs($this->staff())
+            ->getJson('/api/inbox')
+            ->assertOk()
+            ->assertJsonPath('meta.etiquetas', ['PACIENTES NO RED', 'Población objeto']);
+    }
+
+    public function test_es_etiqueta_sistema_filtra_las_del_buzon(): void
+    {
+        $this->assertTrue(InboxMensaje::esEtiquetaSistema('INBOX'));
+        $this->assertTrue(InboxMensaje::esEtiquetaSistema('\\Seen'));
+        $this->assertTrue(InboxMensaje::esEtiquetaSistema('CATEGORY_PERSONAL'));
+        $this->assertTrue(InboxMensaje::esEtiquetaSistema('UNREAD'));
+        $this->assertFalse(InboxMensaje::esEtiquetaSistema('PACIENTES NO RED'));
+        $this->assertFalse(InboxMensaje::esEtiquetaSistema('Población objeto'));
+    }
+
+    public function test_cambiar_etiquetas_sin_cambios_responde_sin_tocar_el_buzon(): void
+    {
+        $correo = $this->correo(['etiquetas' => ['\\Seen', 'PACIENTES NO RED']]);
+
+        $this->actingAs($this->staff())
+            ->putJson("/api/inbox/{$correo->id}/etiquetas", ['etiquetas' => ['PACIENTES NO RED']])
+            ->assertOk()
+            ->assertJsonPath('data.etiquetas', ['PACIENTES NO RED']);
+    }
+
+    public function test_cambiar_etiquetas_sin_buzon_devuelve_error_claro(): void
+    {
+        Setting::set('gmail_modo', 'servicio');
+        $correo = $this->correo(['etiquetas' => null]);
+
+        $this->actingAs($this->staff())
+            ->putJson("/api/inbox/{$correo->id}/etiquetas", ['etiquetas' => ['PACIENTES NO RED']])
+            ->assertStatus(503);
+    }
+
+    public function test_necesita_etiquetas_detecta_las_filas_que_solo_tienen_banderas(): void
+    {
+        $this->assertTrue((new InboxMensaje(['etiquetas' => null]))->necesitaEtiquetas());
+        $this->assertTrue((new InboxMensaje(['etiquetas' => ['\\Seen', '\\Flagged']]))->necesitaEtiquetas());
+        $this->assertTrue((new InboxMensaje(['etiquetas' => []]))->necesitaEtiquetas());
+        // Etiquetas reales del buzón (del sistema o propias): ya está cargada.
+        $this->assertFalse((new InboxMensaje(['etiquetas' => ['\\Inbox']]))->necesitaEtiquetas());
+        $this->assertFalse((new InboxMensaje(['etiquetas' => ['\\Seen', 'PACIENTES NO RED']]))->necesitaEtiquetas());
+    }
+
+    public function test_abrir_un_correo_sin_buzon_no_falla_por_las_etiquetas(): void
+    {
+        $correo = $this->correo(['etiquetas' => null]);
+
+        $this->actingAs($this->staff())
+            ->getJson("/api/inbox/{$correo->id}")
+            ->assertOk();
+    }
+
+    public function test_responder_contesta_al_remitente_sin_tocar_la_gestion(): void
+    {
+        $correo = $this->correo(['remitente_email' => 'clinica@example.com']);
+
+        $this->actingAs($this->staff())
+            ->postJson("/api/inbox/{$correo->id}/responder", [
+                'cuerpo' => 'Recibimos su correo, estamos revisando la disponibilidad.',
+                'cc' => ['jefe@example.com'],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.contestado_por', 'Super Administrador');
+
+        $correo->refresh();
+        $this->assertNotNull($correo->contestado_at);
+        $this->assertNull($correo->gestion);
+        $this->assertSame('Contestados', $correo->carpeta);
+        $this->assertStringContainsString('clinica@example.com', (string) $correo->contestado_detalle);
+        $this->assertStringContainsString('jefe@example.com', (string) $correo->contestado_detalle);
+    }
+
+    public function test_responder_saca_todo_el_hilo_de_la_entrada(): void
+    {
+        $staff = $this->staff();
+        $this->correo(['asunto' => 'Remisión', 'thread_id' => 'hilo-1']);
+        $ultimo = $this->correo(['asunto' => 'Re: Remisión', 'thread_id' => 'hilo-1']);
+        $gestionado = $this->correo(['asunto' => 'Radicado', 'thread_id' => 'hilo-1', 'gestion' => 'radicada', 'carpeta' => 'Gestionados']);
+
+        $this->actingAs($staff)
+            ->postJson("/api/inbox/{$ultimo->id}/responder", ['cuerpo' => 'Gracias, lo revisamos.'])
+            ->assertOk();
+
+        // Todo el hilo sin carpeta salió de la Entrada; el gestionado conserva la suya.
+        $this->assertSame('Contestados', InboxMensaje::where('asunto', 'Remisión')->first()->carpeta);
+        $this->assertSame('Gestionados', $gestionado->fresh()->carpeta);
+
+        $this->actingAs($staff)
+            ->getJson('/api/inbox')
+            ->assertJsonCount(0, 'data');
+        $this->actingAs($staff)
+            ->getJson('/api/inbox?carpeta=Contestados')
+            ->assertJsonCount(1, 'data');
+    }
+
+    public function test_responder_exige_el_cuerpo_del_mensaje(): void
+    {
+        $correo = $this->correo();
+
+        $this->actingAs($this->staff())
+            ->postJson("/api/inbox/{$correo->id}/responder", ['cuerpo' => ''])
+            ->assertStatus(422);
+    }
+
+    public function test_responder_falla_si_el_correo_no_tiene_remitente(): void
+    {
+        $correo = $this->correo(['remitente_email' => null]);
+
+        $this->actingAs($this->staff())
+            ->postJson("/api/inbox/{$correo->id}/responder", ['cuerpo' => 'Hola'])
+            ->assertStatus(422);
+
+        $this->assertNull($correo->fresh()->contestado_at);
+        $this->assertNull($correo->fresh()->carpeta);
     }
 
     public function test_abrir_un_correo_lo_marca_como_leido(): void

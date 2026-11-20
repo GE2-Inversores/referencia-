@@ -1,12 +1,12 @@
 <template>
   <div class="inbx-page h-full overflow-hidden p-2 sm:p-3">
     <div class="inbx-wrap">
-      <header v-if="!panelNegar && !panelAceptar && !panelReenviar" class="inbx-head">
+      <header v-if="!panelNegar && !panelAceptar && !panelReenviar && !panelContestar" class="inbx-head">
         <span class="inbx-head-icon"><component :is="InboxIcon" class="w-4 h-4" /></span>
         <h1>Bandeja de correo</h1>
         <small v-if="gmail.buzon">{{ gmail.buzon }}</small>
         <span v-if="noLeidos > 0" class="inbx-badge">{{ noLeidos }} sin leer</span>
-        <div v-if="!panelNegar && !panelAceptar && !panelReenviar" class="inbx-head-actions">
+        <div v-if="!panelNegar && !panelAceptar && !panelReenviar && !panelContestar" class="inbx-head-actions">
           <div class="inbx-tabs">
             <button type="button" :class="{ 'inbx-tab-on': filtro === 'todos' }" @click="cambiarFiltro('todos')">Todos</button>
             <button type="button" :class="{ 'inbx-tab-on': filtro === 'no_leidos' }" @click="cambiarFiltro('no_leidos')">No leídos</button>
@@ -32,13 +32,13 @@
         </div>
       </header>
 
-      <p v-if="!panelNegar && !panelAceptar && !panelReenviar && gmail.ultimo_error" class="inbx-alerta">Error de sincronización: {{ gmail.ultimo_error }}</p>
-      <p v-else-if="!panelNegar && !panelAceptar && !panelReenviar && gmailCargado && !gmail.configurado" class="inbx-alerta">
+      <p v-if="!panelNegar && !panelAceptar && !panelReenviar && !panelContestar && gmail.ultimo_error" class="inbx-alerta">Error de sincronización: {{ gmail.ultimo_error }}</p>
+      <p v-else-if="!panelNegar && !panelAceptar && !panelReenviar && !panelContestar && gmailCargado && !gmail.configurado" class="inbx-alerta">
         El buzón aún no está configurado — define el correo y sus credenciales en Configuración → Correo.
       </p>
-      <p v-else-if="!panelNegar && !panelAceptar && !panelReenviar && gmail.ultima_sync" class="inbx-sync-info">Última sincronización: {{ fechaLarga(gmail.ultima_sync) }}</p>
+      <p v-else-if="!panelNegar && !panelAceptar && !panelReenviar && !panelContestar && gmail.ultima_sync" class="inbx-sync-info">Última sincronización: {{ fechaLarga(gmail.ultima_sync) }}</p>
 
-      <div class="inbx-body" :class="{ 'inbx-body-negar': panelNegar || panelAceptar || panelReenviar }">
+      <div class="inbx-body" :class="{ 'inbx-body-negar': panelNegar || panelAceptar || panelReenviar || panelContestar }">
         <aside class="inbx-list">
           <p v-if="cargando && mensajes.length === 0" class="inbx-vacio">Cargando correos…</p>
           <p v-else-if="mensajes.length === 0" class="inbx-vacio">No hay correos{{ filtro === 'no_leidos' ? ' sin leer' : '' }}.</p>
@@ -49,7 +49,7 @@
             class="inbx-item"
             :class="{
               'inbx-item-on': seleccionado?.id === m.id,
-              'inbx-item-new': !m.leido,
+              'inbx-item-new': sinLeer(m),
               'inbx-item-rad': m.gestion === 'radicada' || !!m.solicitud,
               'inbx-item-neg': m.gestion === 'negada',
             }"
@@ -61,6 +61,10 @@
               <time>{{ fechaCorta(m.recibido_en) }}</time>
             </span>
             <span class="inbx-subject">{{ m.asunto }}</span>
+            <span v-if="etiquetasDe(m).length" class="inbx-item-etq">
+              <span v-for="e in etiquetasDe(m).slice(0, 2)" :key="e" class="inbx-chip" :style="{ '--chip': colorEtiqueta(e) }">{{ e }}</span>
+              <span v-if="etiquetasDe(m).length > 2" class="inbx-chip-mas" :title="etiquetasDe(m).join(', ')">+{{ etiquetasDe(m).length - 2 }}</span>
+            </span>
             <span class="inbx-snippet">{{ m.snippet }}</span>
             <span class="inbx-item-meta">
               <span
@@ -77,8 +81,14 @@
               >
                 <component :is="XCircleIcon" class="w-3 h-3" /> Negada
               </span>
+              <span v-if="m.contestado_at" class="inbx-tag-cont" :title="`Contestado por ${m.contestado_por || 'el equipo'}`">
+                <component :is="ReplyIcon" class="w-3 h-3" /> Contestado
+              </span>
+              <span v-if="(m.hilo_total ?? 1) > 1" class="inbx-hilo" :title="`${m.hilo_total} mensajes en esta conversación`">
+                <component :is="MessagesIcon" class="w-3 h-3" /> {{ m.hilo_total }}
+              </span>
               <component v-if="m.tiene_adjuntos" :is="ClipIcon" class="w-3 h-3" />
-              <i v-if="!m.leido" class="inbx-dot" />
+              <i v-if="sinLeer(m)" class="inbx-dot" />
             </span>
           </button>
 
@@ -90,11 +100,31 @@
         <section class="inbx-reader">
           <p v-if="!seleccionado" class="inbx-vacio">Selecciona un correo para leerlo.</p>
           <template v-else>
+            <div v-if="hilo.length > 1" class="inbx-hilos">
+              <p class="inbx-hilos-tit">
+                <component :is="MessagesIcon" class="w-3.5 h-3.5" />
+                Conversación · {{ hilo.length }} mensajes
+              </p>
+              <button
+                v-for="h in hilo" :key="h.id"
+                type="button"
+                class="inbx-hilo-item"
+                :class="{ 'inbx-hilo-on': seleccionado.id === h.id, 'inbx-hilo-new': !h.leido }"
+                @click="abrir(h)"
+              >
+                <strong>{{ nombreRemitente(h.remitente) }}</strong>
+                <span class="inbx-hilo-snip">{{ h.snippet }}</span>
+                <time>{{ fechaCorta(h.recibido_en) }}</time>
+              </button>
+            </div>
             <header class="inbx-reader-head">
               <h2>{{ seleccionado.asunto }}</h2>
               <p><strong>De:</strong> {{ seleccionado.remitente }}</p>
               <p><strong>Para:</strong> {{ seleccionado.para }}</p>
               <time>{{ fechaLarga(seleccionado.recibido_en) }}</time>
+              <div v-if="etiquetasDe(seleccionado).length" class="inbx-etiquetas">
+                <span v-for="e in etiquetasDe(seleccionado)" :key="e" class="inbx-chip" :style="{ '--chip': colorEtiqueta(e) }">{{ e }}</span>
+              </div>
               <div v-if="seleccionado.adjuntos?.length" class="inbx-adjuntos">
                 <a v-for="(a, i) in seleccionado.adjuntos" :key="i" class="inbx-adjunto"
                   :href="`/api/inbox/${seleccionado.id}/adjunto/${i}`" target="_blank"
@@ -153,7 +183,29 @@
                 </button>
               </div>
             </div>
+            <p v-if="seleccionado.contestado_at" class="inbx-contestado" :title="seleccionado.contestado_detalle || ''">
+              <component :is="ReplyIcon" class="w-3.5 h-3.5" />
+              Contestado por {{ seleccionado.contestado_por || 'el equipo' }} · {{ fechaLarga(seleccionado.contestado_at) }}
+            </p>
             <div class="inbx-mover">
+              <button
+                type="button" class="inbx-ans" :disabled="respondiendo || !seleccionado.remitente_email"
+                title="Responder al remitente dentro del mismo hilo del correo" @click="abrirContestar"
+              >
+                <component :is="ReplyIcon" class="w-4 h-4" /> Contestar
+              </button>
+              <component :is="TagIcon" class="w-4 h-4" />
+              <el-select
+                :model-value="etiquetasDe(seleccionado)"
+                size="small" multiple filterable allow-create default-first-option
+                placeholder="Etiquetas…"
+                class="inbx-mover-sel"
+                :disabled="guardandoEtiquetas"
+                title="Marcar el correo con etiquetas, igual que en Gmail"
+                @change="guardarEtiquetas"
+              >
+                <el-option v-for="e in opcionesEtiquetas" :key="e" :label="e" :value="e" />
+              </el-select>
               <template v-if="seleccionado.gestion || seleccionado.solicitud">
                 <component :is="FolderIcon" class="w-4 h-4" />
                 <span>Carpeta</span>
@@ -278,13 +330,13 @@
             </div>
             <div v-else-if="formNegar.grupo_negacion === 'no_red'">
               <label class="inbx-negar-label">Motivo de negación <span class="inbx-req">*</span></label>
-              <el-input v-model="formNegar.motivo_negacion" type="textarea" :rows="3" placeholder="Indique el motivo..." />
+              <el-input v-model="formNegar.motivo_negacion" type="textarea" :rows="3" placeholder="Indique el motivo..." maxlength="1500" show-word-limit />
             </div>
             <p v-else class="negar-grupo-hint">Selecciona el grupo para habilitar el motivo de negación.</p>
 
             <div>
               <label class="inbx-negar-label">Observaciones adicionales</label>
-              <el-input v-model="formNegar.observaciones" type="textarea" :rows="2" placeholder="Opcional" />
+              <el-input v-model="formNegar.observaciones" type="textarea" :rows="2" placeholder="Opcional" maxlength="2000" show-word-limit />
             </div>
 
             <div>
@@ -417,7 +469,7 @@
 
             <div>
               <label class="inbx-negar-label">Diagnóstico principal <span class="inbx-req">*</span></label>
-              <el-input v-model="formSol.diagnostico" placeholder="Ej: ULCERA DEL MIEMBRO INFERIOR - L97X" />
+              <el-input v-model="formSol.diagnostico" maxlength="400" placeholder="Ej: ULCERA DEL MIEMBRO INFERIOR - L97X" />
             </div>
 
             <p class="inbx-form-seccion">Datos de la remisión</p>
@@ -523,7 +575,7 @@
 
             <div>
               <label class="inbx-negar-label">Nota para el destinatario</label>
-              <el-input v-model="formReenviar.nota" type="textarea" :rows="3" placeholder="Opcional — va arriba del correo original" />
+              <el-input v-model="formReenviar.nota" type="textarea" :rows="3" placeholder="Opcional — va arriba del correo original" maxlength="1500" show-word-limit />
             </div>
 
             <label class="inbx-fwd-check">
@@ -548,6 +600,50 @@
             <button type="button" class="inbx-negar-confirm inbx-fwd-confirm" :disabled="reenviando" @click="confirmarReenvio">
               <component :is="reenviando ? RefreshIcon : ForwardIcon" class="w-3.5 h-3.5" :class="{ 'animate-spin': reenviando }" />
               {{ reenviando ? 'Reenviando…' : 'Reenviar correo' }}
+            </button>
+          </footer>
+        </aside>
+
+        <!-- Contestar el correo al remitente, dentro del mismo hilo. -->
+        <aside v-if="panelContestar" class="inbx-negar">
+          <header class="inbx-negar-head">
+            <span class="inbx-negar-icon inbx-ans-icon"><component :is="ReplyIcon" class="w-5 h-5" /></span>
+            <div class="inbx-negar-head-info">
+              <h3>Contestar correo</h3>
+              <p>La respuesta sale al remitente dentro del mismo hilo del correo</p>
+            </div>
+            <button type="button" class="inbx-negar-close" @click="panelContestar = false">
+              <component :is="XIcon" class="w-4 h-4" />
+            </button>
+          </header>
+
+          <div class="inbx-negar-body">
+            <div class="inbx-negar-paciente">
+              <strong>{{ seleccionado?.asunto || '(sin asunto)' }}</strong>
+              <span>{{ seleccionado?.remitente }}</span>
+            </div>
+
+            <div>
+              <label class="inbx-negar-label">Para</label>
+              <el-input :model-value="seleccionado?.remitente_email || '(sin correo de remitente)'" disabled />
+            </div>
+
+            <div>
+              <label class="inbx-negar-label">Copia (CC)</label>
+              <el-select v-model="formContestar.cc" multiple filterable allow-create default-first-option :reserve-keyword="false" collapse-tags :max-collapse-tags="2" placeholder="Correos adicionales que reciban la respuesta (opcional)" class="w-full" />
+            </div>
+
+            <div>
+              <label class="inbx-negar-label">Respuesta <span class="inbx-req">*</span></label>
+              <el-input v-model="formContestar.cuerpo" type="textarea" :rows="7" placeholder="Escriba la respuesta que recibirá el remitente…" maxlength="4000" show-word-limit />
+            </div>
+          </div>
+
+          <footer class="inbx-negar-foot">
+            <button type="button" class="inbx-negar-cancel" :disabled="respondiendo" @click="panelContestar = false">Cancelar</button>
+            <button type="button" class="inbx-negar-confirm inbx-ans-confirm" :disabled="respondiendo" @click="confirmarRespuesta">
+              <component :is="respondiendo ? RefreshIcon : ReplyIcon" class="w-3.5 h-3.5" :class="{ 'animate-spin': respondiendo }" />
+              {{ respondiendo ? 'Enviando…' : 'Enviar respuesta' }}
             </button>
           </footer>
         </aside>
@@ -610,6 +706,9 @@ import {
   UserX as UserXIcon,
   Users as UsersIcon,
   Forward as ForwardIcon,
+  MessagesSquare as MessagesIcon,
+  Tag as TagIcon,
+  Reply as ReplyIcon,
 } from '@lucide/vue';
 import { ElMessageBox } from 'element-plus';
 import http from '@/plugins/axios';
@@ -638,6 +737,12 @@ interface InboxItem {
   gestion_at?: string | null;
   gestion_detalle?: string | null;
   carpeta?: string | null;
+  etiquetas?: string[] | null;
+  contestado_at?: string | null;
+  contestado_por?: string | null;
+  contestado_detalle?: string | null;
+  hilo_total?: number;
+  hilo_sin_leer?: number;
   solicitud?: { id: number; estado: string; nombre_quien_responde: string | null; created_at: string } | null;
 }
 
@@ -650,6 +755,60 @@ interface GmailInfo {
 
 const mensajes = ref<InboxItem[]>([]);
 const seleccionado = ref<InboxItem | null>(null);
+const hilo = ref<InboxItem[]>([]);
+
+// Un hilo se marca como no leído si cualquiera de sus mensajes lo está —
+// la fila de la lista muestra el último, pero puede haber otro sin leer.
+function sinLeer(m: InboxItem): boolean {
+  return (m.hilo_sin_leer ?? (m.leido ? 0 : 1)) > 0;
+}
+
+// Etiquetas: se muestran solo las personalizadas (las de sistema, como
+// INBOX o \Seen, se guardan pero no se ven). El color sale del nombre,
+// estable entre correos — como los colores por etiqueta de Gmail.
+const RE_ETIQUETA_SISTEMA = /^(INBOX|UNREAD|SENT|DRAFTS?|TRASH|SPAM|JUNK|IMPORTANT|STARRED|CHAT|MUTED|ALL|ARCHIVE|BIN|FLAGGED|SEEN|DELETED|ANSWERED|RECENT|CATEGORY_|VOICEMAIL)/i;
+const ETIQUETA_COLORES = ['#ea580c', '#2563eb', '#059669', '#7c3aed', '#db2777', '#0891b2', '#ca8a04', '#dc2626'];
+const etiquetasDisponibles = ref<string[]>([]);
+const guardandoEtiquetas = ref(false);
+
+function etiquetasDe(m: InboxItem | null | undefined): string[] {
+  return (m?.etiquetas ?? []).filter((e) => !RE_ETIQUETA_SISTEMA.test(e.replace(/^\\+/, '')));
+}
+
+const opcionesEtiquetas = computed<string[]>(() =>
+  [...new Set([...etiquetasDisponibles.value, ...etiquetasDe(seleccionado.value)])].sort()
+);
+
+function colorEtiqueta(nombre: string): string {
+  let h = 0;
+  for (const c of nombre) {
+    h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  }
+  return ETIQUETA_COLORES[h % ETIQUETA_COLORES.length];
+}
+
+async function guardarEtiquetas(valores: (string | number)[]): Promise<void> {
+  if (!seleccionado.value) {
+    return;
+  }
+  guardandoEtiquetas.value = true;
+  try {
+    const { data } = await http.put(`/api/inbox/${seleccionado.value.id}/etiquetas`, {
+      etiquetas: valores.map(String),
+    });
+    seleccionado.value.etiquetas = data.data.etiquetas;
+    const item = mensajes.value.find((x) => x.id === seleccionado.value!.id);
+    if (item) {
+      item.etiquetas = data.data.etiquetas;
+    }
+    etiquetasDisponibles.value = data.etiquetas ?? etiquetasDisponibles.value;
+    notify.success('Etiquetas actualizadas.');
+  } catch (e: any) {
+    notify.error(e.response?.data?.message || 'No se pudieron actualizar las etiquetas.');
+  } finally {
+    guardandoEtiquetas.value = false;
+  }
+}
 
 const esCorreoSolicitud = computed<boolean>(() => {
   const m = seleccionado.value;
@@ -698,12 +857,62 @@ const carpetaReenviar = ref('Gestionados');
 
 const panelReenviar = ref(false);
 const reenviando = ref(false);
+
+const panelContestar = ref(false);
+const respondiendo = ref(false);
+const formContestar = ref<{ cuerpo: string; cc: string[] }>({ cuerpo: '', cc: [] });
+
+function abrirContestar(): void {
+  panelNegar.value = false;
+  panelAceptar.value = false;
+  panelReenviar.value = false;
+  formContestar.value = { cuerpo: '', cc: [] };
+  panelContestar.value = true;
+}
+
+async function confirmarRespuesta(): Promise<void> {
+  if (!seleccionado.value || respondiendo.value) {
+    return;
+  }
+  const cuerpo = formContestar.value.cuerpo.trim();
+  if (!cuerpo) {
+    notify.warning('Escribe la respuesta antes de enviarla.');
+    return;
+  }
+  const cc = formContestar.value.cc.filter((c) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c));
+  respondiendo.value = true;
+  try {
+    const { data } = await http.post(`/api/inbox/${seleccionado.value.id}/responder`, { cuerpo, cc });
+    Object.assign(seleccionado.value, {
+      contestado_at: data.data.contestado_at,
+      contestado_por: data.data.contestado_por,
+      contestado_detalle: data.data.contestado_detalle,
+      carpeta: data.data.carpeta,
+    });
+    const item = mensajes.value.find((x) => x.id === seleccionado.value!.id);
+    if (item) {
+      item.contestado_at = data.data.contestado_at;
+      item.contestado_por = data.data.contestado_por;
+      item.carpeta = data.data.carpeta;
+    }
+    carpetas.value = data.carpetas ?? carpetas.value;
+    notify.success(data.message || 'Respuesta enviada.');
+    panelContestar.value = false;
+    // El hilo salió a «Contestados»: recargar para que desaparezca de la Entrada.
+    void cargar(true);
+  } catch (e: any) {
+    notify.error(e.response?.data?.message || 'No se pudo enviar la respuesta.');
+  } finally {
+    respondiendo.value = false;
+  }
+}
 const correosClinicas = ref<{ nombre: string; email: string }[]>([]);
 const formReenviar = ref({ para: '', nota: '', avisar_remitente: true });
 
 function abrirReenviar(): void {
   panelNegar.value = false;
   panelAceptar.value = false;
+  panelContestar.value = false;
   carpetaReenviar.value = 'Gestionados';
   formReenviar.value = {
     para: '',
@@ -763,6 +972,8 @@ function abrirNegar(): void {
   horaNegacion.value = new Date().toTimeString().slice(0, 5);
   formNegar.value = { eps: '', grupo_negacion: '', motivo_negacion: '', observaciones: '', correos_extra: [] };
   panelAceptar.value = false;
+  panelReenviar.value = false;
+  panelContestar.value = false;
   panelNegar.value = true;
 }
 
@@ -1000,6 +1211,8 @@ function abrirAceptar(): void {
     aislamiento: false, tipo_aislamiento: '', gestante: false, condicion_especial: '',
   };
   panelNegar.value = false;
+  panelReenviar.value = false;
+  panelContestar.value = false;
   panelAceptar.value = true;
   extraerDatosDelCorreo();
 }
@@ -1185,6 +1398,7 @@ async function cargar(reiniciar = false): Promise<void> {
     meta.value = { total: data.meta.total, pagina: data.meta.pagina, paginas: data.meta.paginas };
     noLeidos.value = data.meta.no_leidos;
     carpetas.value = data.meta.carpetas ?? carpetas.value;
+    etiquetasDisponibles.value = data.meta.etiquetas ?? etiquetasDisponibles.value;
     gmail.value = data.gmail;
     gmailCargado.value = true;
   } catch {
@@ -1198,6 +1412,7 @@ function cambiarFiltro(f: 'todos' | 'no_leidos'): void {
   if (filtro.value === f) return;
   filtro.value = f;
   seleccionado.value = null;
+  hilo.value = [];
   void cargar(true);
 }
 
@@ -1239,6 +1454,7 @@ async function enviarPapelera(): Promise<void> {
     const { data } = await http.post(`/api/inbox/${m.id}/papelera`);
     mensajes.value = mensajes.value.filter((x) => x.id !== m.id);
     seleccionado.value = null;
+    hilo.value = [];
     carpetas.value = data.carpetas ?? carpetas.value;
     notify.success(data.message);
   } catch (e: any) {
@@ -1250,6 +1466,7 @@ async function enviarPapelera(): Promise<void> {
 
 function cambiarCarpeta(): void {
   seleccionado.value = null;
+  hilo.value = [];
   void cargar(true);
 }
 
@@ -1258,16 +1475,36 @@ function cargarMas(): void {
   void cargar();
 }
 
+async function cargarHilo(id: number): Promise<void> {
+  try {
+    const { data } = await http.get(`/api/inbox/${id}/hilo`);
+    hilo.value = data.data ?? [];
+  } catch {
+    hilo.value = [];
+  }
+}
+
 async function abrir(m: InboxItem): Promise<void> {
   seleccionado.value = { ...m, cuerpo_texto: null, cuerpo_html: null };
   panelNegar.value = false;
   panelAceptar.value = false;
+  panelReenviar.value = false;
+  panelContestar.value = false;
   cargandoDetalle.value = true;
   try {
     const { data } = await http.get(`/api/inbox/${m.id}`);
     seleccionado.value = data.data;
+    if ((m.hilo_total ?? 0) > 1) {
+      void cargarHilo(m.id);
+    } else if (!hilo.value.some((x) => x.id === m.id)) {
+      hilo.value = [];
+    }
     if (!m.leido) {
       m.leido = true;
+      const hermano = hilo.value.find((x) => x.id === m.id);
+      if (hermano) {
+        hermano.leido = true;
+      }
       noLeidos.value = Math.max(0, noLeidos.value - 1);
     }
   } catch {
@@ -1339,6 +1576,7 @@ async function refrescar(): Promise<void> {
     });
     noLeidos.value = data.meta.no_leidos;
     carpetas.value = data.meta.carpetas ?? carpetas.value;
+    etiquetasDisponibles.value = data.meta.etiquetas ?? etiquetasDisponibles.value;
     gmail.value = data.gmail;
     gmailCargado.value = true;
     meta.value.total = data.meta.total;
@@ -1451,6 +1689,38 @@ onUnmounted(() => window.clearInterval(temporizador));
 .inbx-snippet { display: -webkit-box; overflow: hidden; color: #94a3b8; font-size: 10.5px; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .inbx-item-meta { display: flex; align-items: center; justify-content: flex-end; gap: 6px; color: #94a3b8; }
 .inbx-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #2563eb; }
+.inbx-hilo { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; white-space: nowrap; color: #4f46e5; background: #eef2ff; border: 1px solid #c7d2fe; }
+.inbx-item-etq { display: flex; flex-wrap: wrap; gap: 4px; }
+.inbx-etiquetas { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.inbx-chip { display: inline-flex; align-items: center; max-width: 180px; overflow: hidden; padding: 1px 8px; border-radius: 4px; background: var(--chip, #64748b); color: #fff; font-size: 9.5px; font-weight: 800; letter-spacing: .3px; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.inbx-chip-mas { align-self: center; color: #94a3b8; font-size: 10px; font-weight: 700; }
+.inbx-tag-cont { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 700; white-space: nowrap; color: #1d4ed8; background: #dbeafe; border: 1px solid #bfdbfe; }
+.dark .inbx-tag-cont { color: #93c5fd; background: rgba(59,130,246,.14); border-color: rgba(96,165,250,.3); }
+.inbx-contestado { display: flex; align-items: center; gap: 6px; margin: 0; padding: 7px 14px; border-bottom: 1px solid #edf2f9; background: #eff6ff; color: #1e40af; font-size: 11px; font-weight: 700; }
+.dark .inbx-contestado { border-color: #22304a; background: rgba(59,130,246,.1); color: #93c5fd; }
+.inbx-ans { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; font-size: 11.5px; font-weight: 700; color: #1d4ed8; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 999px; cursor: pointer; transition: all .15s; }
+.inbx-ans:hover:not(:disabled) { background: #dbeafe; border-color: #93c5fd; }
+.inbx-ans:disabled { opacity: .5; cursor: not-allowed; }
+.dark .inbx-ans { color: #93c5fd; background: rgba(59,130,246,.1); border-color: rgba(96,165,250,.35); }
+.inbx-ans-icon { background: linear-gradient(135deg, #60a5fa, #2563eb) !important; }
+.inbx-ans-confirm { background: linear-gradient(135deg, #3b82f6, #2563eb) !important; box-shadow: 0 4px 12px rgba(37,99,235,.3) !important; }
+.dark .inbx-hilo { color: #a5b4fc; background: rgba(99,102,241,.14); border-color: rgba(129,140,248,.35); }
+
+.inbx-hilos { flex-shrink: 0; max-height: 168px; overflow-y: auto; padding: 8px 12px; border-bottom: 1px solid #edf2f9; background: #f8faff; scrollbar-width: thin; }
+.dark .inbx-hilos { border-color: #22304a; background: #141a29; }
+.inbx-hilos-tit { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; color: #4f46e5; font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; }
+.dark .inbx-hilos-tit { color: #a5b4fc; }
+.inbx-hilo-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; border: 1px solid transparent; border-radius: 8px; background: transparent; text-align: left; cursor: pointer; transition: background .12s; }
+.inbx-hilo-item:hover { background: #eef3fc; }
+.dark .inbx-hilo-item:hover { background: #1a2438; }
+.inbx-hilo-item strong { flex-shrink: 0; max-width: 40%; overflow: hidden; color: #334155; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.inbx-hilo-new strong { color: #0d2d5e; font-weight: 800; }
+.dark .inbx-hilo-item strong { color: #cbd5e1; }
+.dark .inbx-hilo-new strong { color: #f1f5f9; }
+.inbx-hilo-snip { flex: 1; overflow: hidden; color: #94a3b8; font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.inbx-hilo-item time { flex-shrink: 0; color: #94a3b8; font-size: 10px; font-weight: 600; }
+.inbx-hilo-on { border-color: #c7d2fe; background: #eef2ff; }
+.dark .inbx-hilo-on { border-color: rgba(129,140,248,.4); background: rgba(99,102,241,.14); }
 .inbx-mas { margin-top: 2px; padding: 8px; border: 1px dashed #c3d6f2; border-radius: 10px; background: transparent; color: #2563eb; font-size: 11.5px; font-weight: 700; cursor: pointer; }
 .dark .inbx-mas { border-color: #2c3f5e; color: #93c5fd; }
 

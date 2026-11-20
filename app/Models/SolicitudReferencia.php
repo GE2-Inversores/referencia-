@@ -104,6 +104,16 @@ class SolicitudReferencia extends Model
     }
 
     /**
+     * Correo de la Bandeja del que nació esta solicitud (cuando la radicaron
+     * desde un correo y no por el portal). Sirve para responder dentro del
+     * mismo hilo del remitente.
+     */
+    public function inboxMensaje(): BelongsTo
+    {
+        return $this->belongsTo(InboxMensaje::class, 'inbox_mensaje_id');
+    }
+
+    /**
      * Correo al que van las notificaciones de estado: el de la clínica
      * registrada cuando existe, o el correo de contacto que el remitente
      * dejó en el formulario público cuando la solicitud no tiene clínica.

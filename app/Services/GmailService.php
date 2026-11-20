@@ -14,8 +14,10 @@ use DirectoryTree\ImapEngine\MessageQueryInterface;
 use DirectoryTree\ImapEngine\Support\BodyPartDecoder;
 use Google\Client;
 use Google\Service\Gmail;
+use Google\Service\Gmail\Label;
 use Google\Service\Gmail\Message;
 use Google\Service\Gmail\MessagePart;
+use Google\Service\Gmail\ModifyMessageRequest;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -283,15 +285,53 @@ class GmailService
      */
     private function encontrarRemotoImap(InboxMensaje $mensaje): ?ImapMessage
     {
-        if (! str_starts_with((string) $mensaje->gmail_id, 'imap-')) {
+        $mailbox = $this->imapMailbox();
+
+        if (str_starts_with((string) $mensaje->gmail_id, 'imap-')) {
+            $uid = (int) str_replace('imap-', '', (string) $mensaje->gmail_id);
+
+            // En Gmail el UID es el mismo en todas las carpetas: un correo
+            // archivado o movido fuera de la entrada sigue en "Todos".
+            $remoto = $mailbox->inbox()->messages()->find($uid)
+                ?? $this->carpetaTodos($mailbox)?->messages()->find($uid);
+
+            if ($remoto) {
+                return $remoto;
+            }
+        }
+
+        // Último recurso: el Message-ID (guardado en thread_id) identifica el
+        // correo aunque su UID haya cambiado o se haya sincronizado por otro modo.
+        return $this->buscarPorMessageId($mailbox, $mensaje);
+    }
+
+    /**
+     * Busca el correo por su Message-ID (guardado en thread_id, recortado a
+     * 40 caracteres) recorriendo las carpetas del buzón. SEARCH compara por
+     * coincidencia parcial, así que el fragmento alcanza.
+     */
+    private function buscarPorMessageId(Mailbox $mailbox, InboxMensaje $mensaje): ?ImapMessage
+    {
+        // Se busca por el Message-ID del propio correo (identificadorCorreo),
+        // no por thread_id: con la agrupación por hilos ese campo guarda la
+        // clave de la conversación y podría encontrar un mensaje distinto.
+        $fragmento = trim((string) ($mensaje->identificadorCorreo() ?? ''));
+
+        if ($fragmento === '') {
             return null;
         }
 
-        $uid = (int) str_replace('imap-', '', (string) $mensaje->gmail_id);
-        $mailbox = $this->imapMailbox();
-        $remoto = $mailbox->inbox()->messages()->find($uid);
+        foreach ($mailbox->folders()->get() as $carpeta) {
+            $carpeta->select(true);
+            $uids = collect($mailbox->connection()->search(['HEADER', 'Message-ID', $fragmento])->tokensAfter(2))
+                ->map->value;
 
-        return $remoto ?? $this->carpetaTodos($mailbox)?->messages()->find($uid);
+            if ($uids->isNotEmpty()) {
+                return $carpeta->messages()->find((int) $uids->first());
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -848,6 +888,8 @@ class GmailService
             return;
         }
 
+        $datos['thread_id'] ??= $this->resolverHilo($datos);
+
         try {
             InboxMensaje::create($datos);
 
@@ -871,6 +913,56 @@ class GmailService
         $minimo['etiquetas'] = null;
 
         InboxMensaje::create($minimo);
+    }
+
+    /**
+     * Clave de la conversación para correos IMAP: si el mensaje responde a
+     * uno que ya conocemos (por In-Reply-To/References) hereda el thread_id
+     * del padre; si no, abre hilo propio con su Message-ID. En modo Gmail
+     * API el thread_id ya viene resuelto por Google.
+     *
+     * @param  array<string, mixed>  $datos
+     */
+    private function resolverHilo(array $datos): ?string
+    {
+        $candidatos = $this->idsReferencias($datos);
+
+        if ($candidatos !== []) {
+            // Filas nuevas guardan el Message-ID completo en message_id; las
+            // viejas lo guardaban recortado a 40 en thread_id — se prueban ambas.
+            $padre = InboxMensaje::query()
+                ->whereIn('message_id', $candidatos)
+                ->orWhereIn('thread_id', array_map(fn (string $id): string => mb_substr($id, 0, 40), $candidatos))
+                ->orderBy('id')
+                ->first(['thread_id', 'message_id']);
+
+            if ($padre) {
+                return $padre->thread_id ?: $padre->message_id;
+            }
+        }
+
+        return isset($datos['message_id']) ? mb_substr((string) $datos['message_id'], 0, 255) : null;
+    }
+
+    /**
+     * Message-IDs citados por In-Reply-To y References, con corchetes y sin
+     * ellos, para encontrar el padre sin importar cómo lo haya guardado la
+     * fila original.
+     *
+     * @param  array<string, mixed>  $datos
+     * @return array<int, string>
+     */
+    private function idsReferencias(array $datos): array
+    {
+        $ids = [];
+
+        foreach (['in_reply_to', 'referencias'] as $campo) {
+            if (preg_match_all('/<[^<>\s]+>/', (string) ($datos[$campo] ?? ''), $coincidencias)) {
+                $ids = array_merge($ids, $coincidencias[0], array_map(fn (string $id): string => trim($id, '<>'), $coincidencias[0]));
+            }
+        }
+
+        return array_values(array_unique($ids));
     }
 
     /**
@@ -917,6 +1009,206 @@ class GmailService
         ];
     }
 
+    /**
+     * Trae del buzón las etiquetas de un correo ya guardado y las deja en
+     * la fila — para los mensajes sincronizados antes de que existiera el
+     * soporte de etiquetas (abrieron su registro con banderas o vacío).
+     */
+    public function refrescarEtiquetas(InboxMensaje $mensaje): void
+    {
+        if (! $this->configurado()) {
+            return;
+        }
+
+        try {
+            $etiquetas = $this->esImap()
+                ? $this->etiquetasRemotasImap($mensaje)
+                : $this->etiquetasRemotasGoogle($mensaje);
+        } catch (Throwable $e) {
+            Log::warning('Bandeja: no se pudieron traer las etiquetas del buzón.', [
+                'mensaje' => $mensaje->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return;
+        }
+
+        if ($etiquetas !== null) {
+            $mensaje->update(['etiquetas' => $etiquetas ?: null]);
+        }
+    }
+
+    /**
+     * @return array<int, string>|null
+     */
+    private function etiquetasRemotasImap(InboxMensaje $mensaje): ?array
+    {
+        $remoto = $this->encontrarRemotoImap($mensaje);
+
+        return $remoto ? $this->etiquetasImap($remoto) : null;
+    }
+
+    /**
+     * @return array<int, string>|null
+     */
+    private function etiquetasRemotasGoogle(InboxMensaje $mensaje): ?array
+    {
+        $remoto = $this->gmail()->users_messages->get('me', (string) $mensaje->gmail_id, ['format' => 'minimal']);
+        $ids = $remoto->getLabelIds() ?? [];
+
+        return array_map(
+            fn (string $id): string => $this->nombresEtiquetasGoogle()[$id] ?? $id,
+            $ids
+        );
+    }
+
+    /**
+     * Etiquetas del correo según Gmail (X-GM-LABELS): las que el personal
+     * marcó en el buzón ("PACIENTES NO RED", "Población objeto"…). Si el
+     * servidor no las soporta se conservan las banderas IMAP como antes.
+     *
+     * @return array<int, string>|null
+     */
+    private function etiquetasImap(ImapMessage $mensaje): ?array
+    {
+        try {
+            $etiquetas = $mensaje->folder()->mailbox()->connection()
+                ->fetch('X-GM-LABELS', $mensaje->uid())
+                ->map(fn ($r) => $r->tokenAt(3)?->lookup('X-GM-LABELS')?->values())
+                ->filter()
+                ->flatten()
+                ->unique()
+                ->values()
+                ->all();
+        } catch (Throwable) {
+            $etiquetas = [];
+        }
+
+        return $etiquetas !== [] ? $etiquetas : ($mensaje->flags() ?: null);
+    }
+
+    /**
+     * Mapa id → nombre de las etiquetas de Gmail (modo API): labelIds trae
+     * "Label_123" y la lista muestra el nombre que el usuario ve en Gmail.
+     *
+     * @return array<string, string>
+     */
+    private function nombresEtiquetasGoogle(): array
+    {
+        if (! array_key_exists('labels_map', $this->ajustes)) {
+            $mapa = [];
+            try {
+                $labels = $this->gmail()->users_labels->listUsersLabels('me')->getLabels() ?? [];
+                foreach ($labels as $label) {
+                    $mapa[$label->getId()] = $label->getName();
+                }
+            } catch (Throwable) {
+                // Sin el mapa se guardan los ids crudos, igual que antes.
+            }
+            $this->ajustes['labels_map'] = $mapa;
+        }
+
+        return $this->ajustes['labels_map'];
+    }
+
+    /**
+     * Deja en el correo exactamente las etiquetas personalizadas pedidas,
+     * tanto en el buzón (X-GM-LABELS por IMAP o labels.modify por la API)
+     * como en la fila local. Las etiquetas de sistema nunca se tocan.
+     *
+     * @param  array<int, string>  $deseadas  nombres de etiquetas visibles
+     * @return array<int, string> etiquetas personalizadas que quedaron
+     */
+    public function ponerEtiquetas(InboxMensaje $mensaje, array $deseadas): array
+    {
+        $deseadas = array_values(array_unique(array_filter(
+            array_map(fn ($e): string => trim((string) $e), $deseadas),
+            fn (string $e): bool => $e !== '' && ! InboxMensaje::esEtiquetaSistema($e)
+        )));
+
+        $actuales = array_values(array_filter(
+            $mensaje->etiquetas ?? [],
+            fn ($e): bool => is_string($e) && ! InboxMensaje::esEtiquetaSistema($e)
+        ));
+
+        $agregar = array_values(array_diff($deseadas, $actuales));
+        $quitar = array_values(array_diff($actuales, $deseadas));
+
+        if ($agregar === [] && $quitar === []) {
+            return $actuales;
+        }
+
+        if ($this->esImap()) {
+            $this->ponerEtiquetasImap($mensaje, $agregar, $quitar);
+        } else {
+            $this->ponerEtiquetasGoogle($mensaje, $agregar, $quitar);
+        }
+
+        // Las etiquetas de sistema guardadas se conservan; solo cambia la
+        // parte personalizada.
+        $sistema = array_values(array_filter(
+            $mensaje->etiquetas ?? [],
+            fn ($e): bool => is_string($e) && InboxMensaje::esEtiquetaSistema($e)
+        ));
+        $mensaje->update(['etiquetas' => array_values(array_unique(array_merge($sistema, $deseadas))) ?: null]);
+
+        return $deseadas;
+    }
+
+    /**
+     * @param  array<int, string>  $agregar
+     * @param  array<int, string>  $quitar
+     */
+    private function ponerEtiquetasImap(InboxMensaje $mensaje, array $agregar, array $quitar): void
+    {
+        $remoto = $this->encontrarRemotoImap($mensaje);
+
+        if ($remoto === null) {
+            throw new RuntimeException('El correo ya no está en el buzón.');
+        }
+
+        $conexion = $remoto->folder()->mailbox()->connection();
+        $comillas = fn (string $etiqueta): string => '"'.str_replace(['"', '\\'], '', $etiqueta).'"';
+
+        if ($agregar !== []) {
+            $conexion->store(array_map($comillas, $agregar), $remoto->uid(), mode: '+', item: 'X-GM-LABELS');
+        }
+
+        if ($quitar !== []) {
+            $conexion->store(array_map($comillas, $quitar), $remoto->uid(), mode: '-', item: 'X-GM-LABELS');
+        }
+    }
+
+    /**
+     * @param  array<int, string>  $agregar
+     * @param  array<int, string>  $quitar
+     */
+    private function ponerEtiquetasGoogle(InboxMensaje $mensaje, array $agregar, array $quitar): void
+    {
+        $gmail = $this->gmail();
+        $mapa = array_flip($this->nombresEtiquetasGoogle()); // nombre → id
+
+        $idDe = function (string $nombre) use ($gmail, &$mapa): string {
+            if (! isset($mapa[$nombre])) {
+                // Etiqueta nueva: Gmail la crea igual que al usarla por primera vez en su propia interfaz.
+                $label = $gmail->users_labels->create('me', new Label([
+                    'name' => $nombre,
+                    'labelListVisibility' => 'labelShow',
+                    'messageListVisibility' => 'show',
+                ]));
+                $mapa[$nombre] = $label->getId();
+            }
+
+            return $mapa[$nombre];
+        };
+
+        $peticion = new ModifyMessageRequest;
+        $peticion->setAddLabelIds(array_map($idDe, $agregar));
+        $peticion->setRemoveLabelIds(array_map($idDe, $quitar));
+
+        $gmail->users_messages->modify('me', (string) $mensaje->gmail_id, $peticion);
+    }
+
     private function imapMailbox(): Mailbox
     {
         return new Mailbox([
@@ -959,7 +1251,11 @@ class GmailService
 
         return [
             'gmail_id' => 'imap-'.$mensaje->uid(),
-            'thread_id' => $mensaje->messageId() ? mb_substr($mensaje->messageId(), 0, 40) : null,
+            // thread_id lo resuelve crearMensaje(): si el correo responde a uno
+            // conocido hereda la clave del hilo; si no, queda con su Message-ID.
+            'message_id' => $mensaje->messageId() ? mb_substr($mensaje->messageId(), 0, 255) : null,
+            'in_reply_to' => ($respondeA = $mensaje->inReplyTo()) ? mb_substr(implode(' ', $respondeA), 0, 2000) : null,
+            'referencias' => ($refs = $mensaje->header('References')?->getValue()) ? mb_substr($refs, 0, 4000) : null,
             'remitente' => mb_substr($remitente, 0, 500),
             'remitente_email' => $de ? mb_substr($de->email(), 0, 255) : null,
             'para' => mb_substr($para, 0, 500),
@@ -969,7 +1265,7 @@ class GmailService
             'cuerpo_html' => $html,
             'tiene_adjuntos' => $adjuntos !== [],
             'adjuntos' => $adjuntos ?: null,
-            'etiquetas' => $mensaje->flags() ?: null,
+            'etiquetas' => $this->etiquetasImap($mensaje),
             // La fecha del encabezado trae la zona del remitente; se guarda
             // normalizada a la zona de la app para ordenar bien por llegada.
             'recibido_en' => Carbon::parse($mensaje->date() ?? 'now')->setTimezone(config('app.timezone')),
@@ -1027,7 +1323,11 @@ class GmailService
 
         return [
             'gmail_id' => $mensaje->getId(),
+            // En modo API el threadId de Google ya es la clave de la conversación.
             'thread_id' => $mensaje->getThreadId(),
+            'message_id' => isset($headers['message-id']) ? mb_substr($headers['message-id'], 0, 255) : null,
+            'in_reply_to' => isset($headers['in-reply-to']) ? mb_substr($headers['in-reply-to'], 0, 2000) : null,
+            'referencias' => isset($headers['references']) ? mb_substr($headers['references'], 0, 4000) : null,
             'remitente' => mb_substr($de, 0, 500),
             'remitente_email' => $this->emailDe($de),
             'para' => mb_substr((string) ($headers['to'] ?? ''), 0, 500),
@@ -1037,7 +1337,10 @@ class GmailService
             'cuerpo_html' => $html,
             'tiene_adjuntos' => $adjuntos !== [],
             'adjuntos' => $adjuntos ?: null,
-            'etiquetas' => $mensaje->getLabelIds() ?: null,
+            'etiquetas' => array_map(
+                fn (string $id): string => $this->nombresEtiquetasGoogle()[$id] ?? $id,
+                $mensaje->getLabelIds() ?? []
+            ) ?: null,
             'recibido_en' => Carbon::createFromTimestampMs((int) $mensaje->getInternalDate())->setTimezone(config('app.timezone')),
         ];
     }

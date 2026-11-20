@@ -8,6 +8,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
+use Illuminate\Mail\Mailables\Headers;
 use Illuminate\Queue\SerializesModels;
 
 class SolicitudEvolucionClinica extends Mailable
@@ -32,5 +33,20 @@ class SolicitudEvolucionClinica extends Mailable
     public function content(): Content
     {
         return new Content(view: 'emails.solicitud-evolucion-clinica');
+    }
+
+    /**
+     * Si la solicitud nació de un correo, la respuesta sale dentro del
+     * mismo hilo del remitente.
+     */
+    public function headers(): Headers
+    {
+        $mensaje = $this->solicitud->inboxMensaje;
+        $id = $mensaje?->identificadorCorreo();
+
+        return new Headers(
+            references: $id ? [trim("{$mensaje->referencias} {$id}")] : [],
+            text: $id ? ['In-Reply-To' => $id] : [],
+        );
     }
 }

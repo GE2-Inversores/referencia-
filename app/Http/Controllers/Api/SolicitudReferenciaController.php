@@ -323,7 +323,7 @@ class SolicitudReferenciaController extends Controller
                     'emails.solicitud-aceptada-sin-cama',
                     ['solicitud' => $solicitud],
                     function ($message) use ($solicitud, $destinatarios) {
-                        $this->aplicarReplyTo($message->to($destinatarios))
+                        $this->aplicarReplyTo($message->to($destinatarios), $solicitud)
                             ->subject("Solicitud de referencia pendiente de cupo - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                     }
                 );
@@ -369,7 +369,7 @@ class SolicitudReferenciaController extends Controller
                 'emails.solicitud-en-espera',
                 ['solicitud' => $solicitud],
                 function ($message) use ($solicitud, $destinatarios) {
-                    $this->aplicarReplyTo($message->to($destinatarios))
+                    $this->aplicarReplyTo($message->to($destinatarios), $solicitud)
                         ->subject("Solicitud de referencia ACEPTADA - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                 }
             );
@@ -560,7 +560,7 @@ class SolicitudReferenciaController extends Controller
                 'emails.solicitud-negada',
                 ['solicitud' => $solicitud],
                 function ($message) use ($solicitud, $destinatarios) {
-                    $this->aplicarReplyTo($message->to($destinatarios))
+                    $this->aplicarReplyTo($message->to($destinatarios), $solicitud)
                         ->subject("Solicitud de referencia NEGADA - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                 }
             );
@@ -668,7 +668,7 @@ class SolicitudReferenciaController extends Controller
                     'motivo' => $validated['motivo'],
                 ],
                 function ($message) use ($solicitud, $destinatarios) {
-                    $this->aplicarReplyTo($message->to($destinatarios))
+                    $this->aplicarReplyTo($message->to($destinatarios), $solicitud)
                         ->subject("Cambio de estado en su solicitud - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                 }
             );
@@ -802,7 +802,7 @@ class SolicitudReferenciaController extends Controller
                 'emails.solicitud-completada',
                 ['solicitud' => $solicitud],
                 function ($message) use ($solicitud, $destinatarios) {
-                    $this->aplicarReplyTo($message->to($destinatarios))
+                    $this->aplicarReplyTo($message->to($destinatarios), $solicitud)
                         ->subject("Solicitud de referencia COMPLETADA - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                 }
             );
@@ -869,7 +869,7 @@ class SolicitudReferenciaController extends Controller
                 'emails.solicitud-negada',
                 ['solicitud' => $solicitud],
                 function ($message) use ($solicitud, $destinatarios) {
-                    $this->aplicarReplyTo($message->to($destinatarios))
+                    $this->aplicarReplyTo($message->to($destinatarios), $solicitud)
                         ->subject("Solicitud de referencia NEGADA - {$solicitud->primer_nombre} {$solicitud->primer_apellido}");
                 }
             );
@@ -1040,11 +1040,15 @@ class SolicitudReferenciaController extends Controller
      * Agrega el Reply-To configurado al mensaje — cuando el setting queda
      * vacío el correo sale sin encabezado Reply-To.
      */
-    private function aplicarReplyTo(Message $message): Message
+    private function aplicarReplyTo(Message $message, ?SolicitudReferencia $solicitud = null): Message
     {
         if ($replyTo = config('mail.saliente_reply_to')) {
             $message->replyTo($replyTo, config('mail.saliente_reply_to_nombre'));
         }
+
+        // Si la solicitud nació de un correo, la respuesta queda dentro del
+        // mismo hilo del remitente (In-Reply-To/References).
+        $solicitud?->inboxMensaje?->responderEnHilo($message);
 
         return $message;
     }

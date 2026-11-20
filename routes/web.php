@@ -72,6 +72,9 @@ Route::prefix('api')->name('api.')->group(function (): void {
         Route::post('inbox/sincronizar', [InboxController::class, 'sincronizar'])->name('inbox.sincronizar')->middleware('permission:inbox.view');
         Route::get('inbox/verificar-documento', [InboxController::class, 'verificarDocumento'])->name('inbox.verificar-documento')->middleware('permission:inbox.view|solicitudes.view');
         Route::get('inbox/{mensaje}', [InboxController::class, 'show'])->name('inbox.show')->whereNumber('mensaje')->middleware('permission:inbox.view');
+        Route::get('inbox/{mensaje}/hilo', [InboxController::class, 'hilo'])->name('inbox.hilo')->whereNumber('mensaje')->middleware('permission:inbox.view');
+        Route::put('inbox/{mensaje}/etiquetas', [InboxController::class, 'etiquetasUpdate'])->name('inbox.etiquetas')->whereNumber('mensaje')->middleware('permission:inbox.view');
+        Route::post('inbox/{mensaje}/responder', [InboxController::class, 'responder'])->name('inbox.responder')->whereNumber('mensaje')->middleware('permission:inbox.view');
         Route::get('inbox/{mensaje}/adjunto/{indice}', [InboxController::class, 'adjunto'])->name('inbox.adjunto')->whereNumber(['mensaje', 'indice'])->middleware('permission:inbox.view');
         Route::post('inbox/{mensaje}/solicitud', [InboxController::class, 'crearSolicitud'])->name('inbox.solicitud')->whereNumber('mensaje')->middleware('permission:inbox.view|solicitudes.view');
         Route::post('inbox/{mensaje}/carpeta', [InboxController::class, 'moverCarpeta'])->name('inbox.carpeta')->whereNumber('mensaje')->middleware('permission:inbox.view|solicitudes.view');
