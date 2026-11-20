@@ -18,11 +18,6 @@ class InboxEstadistica extends Model
 
     protected $fillable = ['fecha', 'recibidos', 'eliminados', 'contestados'];
 
-    protected function casts(): array
-    {
-        return ['fecha' => 'date'];
-    }
-
     /**
      * Suma al contador del día en que llegó el correo. Nunca interrumpe el
      * flujo que lo invoca: contar es secundario a sincronizar o responder.

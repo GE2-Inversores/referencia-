@@ -23,6 +23,26 @@ class InformeController extends Controller
         return response()->json(['data' => $this->informes->generar($desde, $hasta)]);
     }
 
+    /**
+     * Movimiento de la Bandeja de correo para su propio filtro de fechas;
+     * por defecto, el día de hoy.
+     */
+    public function correos(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->hasPermission('dashboard.view'), Response::HTTP_FORBIDDEN);
+
+        $validated = $request->validate([
+            'desde' => ['nullable', 'date_format:Y-m-d'],
+            'hasta' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:desde'],
+        ]);
+
+        $hoy = CarbonImmutable::now(config('app.display_timezone', config('app.timezone')))->startOfDay();
+        $desde = CarbonImmutable::parse($validated['desde'] ?? $hoy->toDateString())->startOfDay();
+        $hasta = CarbonImmutable::parse($validated['hasta'] ?? $validated['desde'] ?? $hoy->toDateString())->startOfDay();
+
+        return response()->json(['data' => $this->informes->correos($desde, $hasta)]);
+    }
+
     public function exportar(Request $request): BinaryFileResponse
     {
         [$desde, $hasta] = $this->periodo($request);

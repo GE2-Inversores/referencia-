@@ -276,7 +276,7 @@ class InformeReferenciaService
      *
      * @return array{total: int, gestionados: int, negados: int, eliminados: int, contestados: int}
      */
-    private function correos(CarbonInterface $desde, CarbonInterface $hasta): array
+    public function correos(CarbonInterface $desde, CarbonInterface $hasta): array
     {
         $contadores = InboxEstadistica::query()
             ->whereBetween('fecha', [$desde->toDateString(), $hasta->toDateString()])

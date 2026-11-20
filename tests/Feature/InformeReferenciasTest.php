@@ -90,6 +90,21 @@ class InformeReferenciasTest extends TestCase
         $this->assertSame(2, collect($respuesta->json('data.grupos_negacion'))->firstWhere('grupo', 'poblacion_objeto')['total']);
     }
 
+    public function test_mailbox_movement_has_its_own_endpoint_and_defaults_to_today(): void
+    {
+        InboxEstadistica::create(['fecha' => now()->toDateString(), 'recibidos' => 7, 'eliminados' => 2, 'contestados' => 1]);
+        InboxEstadistica::create(['fecha' => now()->subDays(3)->toDateString(), 'recibidos' => 100]);
+        $staff = $this->staff();
+
+        $this->actingAs($staff)->getJson('/api/informes/correos')
+            ->assertOk()
+            ->assertJsonPath('data', ['total' => 7, 'gestionados' => 0, 'negados' => 0, 'eliminados' => 2, 'contestados' => 1]);
+
+        $this->actingAs($staff)->getJson('/api/informes/correos?desde='.now()->subDays(3)->toDateString().'&hasta='.now()->toDateString())
+            ->assertOk()
+            ->assertJsonPath('data.total', 107);
+    }
+
     public function test_pending_requests_are_broken_down_by_destination_service(): void
     {
         $this->solicitud('pendiente_cama', '2026-11-03', ['servicio_remision' => 'UCI']);

@@ -91,22 +91,6 @@
         </div>
       </section>
 
-      <!-- ── Correos de la bandeja ── -->
-      <section class="inf-panel inf-t-indigo inf-correos">
-        <header class="inf-head-panel">
-          <span class="inf-panel-icon"><component :is="MailIcon" class="w-3.5 h-3.5" /></span>
-          <h2>Correos de la bandeja</h2>
-          <small class="inf-seg-hint">Todo lo que llega, no solo lo gestionado · mismo período del seguimiento diario</small>
-        </header>
-        <ul class="inf-indicators inf-ind-fila">
-          <li v-for="c in tarjetasCorreos" :key="c.label" :title="c.ayuda">
-            <span class="inf-ind-icon" :class="c.clase"><component :is="c.icono" class="w-3.5 h-3.5" /></span>
-            <span class="inf-ind-label">{{ c.label }}</span>
-            <span class="inf-ind-pill" :class="c.clase">{{ c.valor }}</span>
-          </li>
-        </ul>
-      </section>
-
       <!-- ── Estados + Resumen ── -->
       <div class="inf-hero">
         <section class="inf-panel inf-t-indigo">
@@ -170,6 +154,21 @@
               <span class="inf-ind-icon inf-ind-red"><component :is="XIcon" class="w-3.5 h-3.5" /></span>
               <span class="inf-ind-label">Negadas por decisión</span>
               <span class="inf-ind-pill inf-ind-red">{{ informe.resumen.negadas_decision }}</span>
+            </li>
+          </ul>
+        </section>
+
+        <section class="inf-panel inf-t-indigo inf-correos">
+          <header class="inf-head-panel">
+            <span class="inf-panel-icon"><component :is="MailIcon" class="w-3.5 h-3.5" /></span>
+            <h2>Correos de la bandeja</h2>
+            <span class="inf-head-space"><DateRangeFilter v-model="rangoCorreos" /></span>
+          </header>
+          <ul class="inf-indicators">
+            <li v-for="c in tarjetasCorreos" :key="c.label" :title="c.ayuda">
+              <span class="inf-ind-icon" :class="c.clase"><component :is="c.icono" class="w-3.5 h-3.5" /></span>
+              <span class="inf-ind-label">{{ c.label }}</span>
+              <span class="inf-ind-pill" :class="c.clase">{{ c.valor }}</span>
             </li>
           </ul>
         </section>
@@ -351,8 +350,22 @@ const cargandoSeg = ref(false);
 
 const datosSeg = computed<InformeCompleto>(() => informeSeg.value ?? informe.value!);
 
+// Filtro propio de «Correos de la bandeja» (por defecto, hoy), independiente del informe y del seguimiento.
+const hoyIso = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+const rangoCorreos = ref<[string, string] | null>([hoyIso, hoyIso]);
+const correosDatos = ref({ total: 0, gestionados: 0, negados: 0, eliminados: 0, contestados: 0 });
+
+async function cargarCorreos(): Promise<void> {
+  try {
+    const { data } = await http.get<{ data: typeof correosDatos.value }>('/api/informes/correos', { params: parametros(rangoCorreos.value) });
+    correosDatos.value = data.data;
+  } catch {
+    notify.error('No se pudo actualizar los correos de la bandeja.');
+  }
+}
+
 const tarjetasCorreos = computed(() => {
-  const c = datosSeg.value.correos ?? { total: 0, gestionados: 0, negados: 0, eliminados: 0, contestados: 0 };
+  const c = correosDatos.value;
 
   return [
     { label: 'Correos totales', valor: c.total, clase: 'inf-ind-blue', icono: MailIcon, ayuda: 'Todos los correos que llegaron al buzón en el período' },
@@ -642,7 +655,9 @@ const opcionesOrigen = computed(() => ({
 
 watch(rango, () => { void cargar(); });
 watch(rangoSeg, () => { void cargarSeg(); });
-onMounted(cargar);
+watch(rangoCorreos, () => { void cargarCorreos(); });
+
+onMounted(() => { void cargarCorreos(); void cargar(); });
 </script>
 
 <style scoped>
@@ -663,8 +678,7 @@ onMounted(cargar);
 .inf-loading { padding: 60px 0; color: #64748b; text-align: center; font-size: 13px; }
 
 .inf-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-bottom: 6px; flex-shrink: 0; }
-@media (max-width: 1500px) { .inf-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 1200px) { .inf-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 900px) { .inf-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 700px) { .inf-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* ── Seguimiento diario ── */
@@ -673,6 +687,7 @@ onMounted(cargar);
 .inf-hero > .inf-panel:first-child { z-index: 25; overflow: visible; }
 .inf-seg-hint { color: #94a3b8; font-size: 10px; font-weight: 600; }
 .inf-head-space { margin-left: auto; }
+.inf-hero > .inf-panel.inf-correos { z-index: 20; overflow: visible; }
 .inf-seg-row { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: stretch; }
 .inf-seg-left { display: flex; align-items: center; gap: 20px; padding: 10px 18px; border: 1px solid #c3d6f2; border-radius: 13px; background: linear-gradient(150deg, #f1f7ff, #f9fcff); }
 .dark .inf-seg-left { border-color: #2c3f5e; background: #131a28; }
@@ -739,7 +754,7 @@ onMounted(cargar);
 @media (max-width: 900px) { .inf-esp { grid-template-columns: repeat(2, minmax(0,1fr)); } }
 
 /* ── Rejillas ── */
-.inf-hero { display: grid; grid-template-columns: minmax(0,1.15fr) minmax(0,.85fr) minmax(0,1.55fr); gap: 6px; margin-bottom: 6px; align-items: stretch; }
+.inf-hero { display: grid; grid-template-columns: minmax(0,1.05fr) minmax(0,.8fr) minmax(0,.8fr) minmax(0,1.45fr); gap: 6px; margin-bottom: 6px; align-items: stretch; }
 .inf-hero .inf-panel { display: flex; flex-direction: column; }
 .inf-hero .inf-panel > :last-child { flex: 1; min-height: 0; }
 .inf-hero > .inf-panel { margin-bottom: 0; }
@@ -833,10 +848,6 @@ onMounted(cargar);
 .inf-indicators li { display: flex; flex: 1; align-items: center; gap: 8px; padding: 5px 9px; border: 1px solid #86a5d8; border-radius: 12px; background: rgba(248,251,255,.8); transition: background .15s ease; }
 .inf-indicators li:hover { background: #f0f6ff; }
 .dark .inf-indicators li:hover { background: #1e2940; }
-.inf-correos { margin-bottom: 6px; }
-.inf-indicators.inf-ind-fila { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
-@media (max-width: 1100px) { .inf-indicators.inf-ind-fila { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 640px) { .inf-indicators.inf-ind-fila { grid-template-columns: 1fr; } }
 .inf-ind-icon { display: grid; width: 22px; height: 22px; flex-shrink: 0; place-items: center; border-radius: 8px; }
 .inf-ind-label { flex: 1; color: #334155; font-size: 11px; font-weight: 600; }
 .inf-ind-pill { min-width: 32px; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; text-align: center; }
