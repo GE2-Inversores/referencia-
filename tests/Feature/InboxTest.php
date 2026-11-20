@@ -274,6 +274,16 @@ class InboxTest extends TestCase
             ->assertStatus(422);
     }
 
+    public function test_el_catalogo_de_etiquetas_incluye_las_guardadas_sin_buzon(): void
+    {
+        $this->correo(['etiquetas' => ['PACIENTES NO RED', 'Población objeto', '\Seen', '\Inbox']]);
+
+        $this->actingAs($this->staff())
+            ->getJson('/api/inbox/etiquetas-buzon')
+            ->assertOk()
+            ->assertJsonPath('data', ['PACIENTES NO RED', 'Población objeto']);
+    }
+
     public function test_responder_falla_si_el_correo_no_tiene_remitente(): void
     {
         $correo = $this->correo(['remitente_email' => null]);

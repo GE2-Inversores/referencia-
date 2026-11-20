@@ -203,6 +203,7 @@
                 :disabled="guardandoEtiquetas"
                 title="Marcar el correo con etiquetas, igual que en Gmail"
                 @change="guardarEtiquetas"
+                @visible-change="(v: boolean) => v && cargarEtiquetasBuzon()"
               >
                 <el-option v-for="e in opcionesEtiquetas" :key="e" :label="e" :value="e" />
               </el-select>
@@ -770,6 +771,20 @@ const RE_ETIQUETA_SISTEMA = /^(INBOX|UNREAD|SENT|DRAFTS?|TRASH|SPAM|JUNK|IMPORTA
 const ETIQUETA_COLORES = ['#ea580c', '#2563eb', '#059669', '#7c3aed', '#db2777', '#0891b2', '#ca8a04', '#dc2626'];
 const etiquetasDisponibles = ref<string[]>([]);
 const guardandoEtiquetas = ref(false);
+const etiquetasBuzonCargadas = ref(false);
+
+// Las etiquetas del buzón se piden al abrir el selector (una sola vez) —
+// así ofrece "Población objeto"… aunque ningún correo guardado las tenga.
+async function cargarEtiquetasBuzon(): Promise<void> {
+  if (etiquetasBuzonCargadas.value) {
+    return;
+  }
+  etiquetasBuzonCargadas.value = true;
+  try {
+    const { data } = await http.get('/api/inbox/etiquetas-buzon');
+    etiquetasDisponibles.value = [...new Set([...etiquetasDisponibles.value, ...(data.data ?? [])])].sort();
+  } catch { /* El selector igual permite escribir etiquetas nuevas. */ }
+}
 
 function etiquetasDe(m: InboxItem | null | undefined): string[] {
   return (m?.etiquetas ?? []).filter((e) => !RE_ETIQUETA_SISTEMA.test(e.replace(/^\\+/, '')));

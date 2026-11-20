@@ -693,6 +693,24 @@ class InboxController extends Controller
     }
 
     /**
+     * Las etiquetas que existen en el buzón de Gmail, unidas a las que ya
+     * usan los correos guardados: el selector ofrece "Población objeto"…
+     * aunque ningún correo de la base las tenga todavía.
+     */
+    public function etiquetasBuzon(GmailService $gmail): JsonResponse
+    {
+        return response()->json([
+            'data' => collect($gmail->etiquetasDelBuzon())
+                ->merge($this->etiquetas())
+                ->filter(fn ($e): bool => is_string($e) && ! InboxMensaje::esEtiquetaSistema($e))
+                ->unique()
+                ->sort()
+                ->values()
+                ->all(),
+        ]);
+    }
+
+    /**
      * Correos de las clínicas registradas, para sugerir el destino al
      * reenviar un correo que llegó a esta Bandeja por error.
      */

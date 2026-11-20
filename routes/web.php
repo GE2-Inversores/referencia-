@@ -81,6 +81,7 @@ Route::prefix('api')->name('api.')->group(function (): void {
         Route::post('inbox/{mensaje}/negar', [InboxController::class, 'negar'])->name('inbox.negar')->whereNumber('mensaje')->middleware('permission:inbox.view|solicitudes.view');
         Route::post('inbox/{mensaje}/reenviar', [InboxController::class, 'reenviar'])->name('inbox.reenviar')->whereNumber('mensaje')->middleware('permission:inbox.view');
         Route::get('inbox/correos-clinicas', [InboxController::class, 'correosClinicas'])->name('inbox.correos-clinicas')->middleware('permission:inbox.view');
+        Route::get('inbox/etiquetas-buzon', [InboxController::class, 'etiquetasBuzon'])->name('inbox.etiquetas-buzon')->middleware('permission:inbox.view');
         Route::post('inbox/{mensaje}/papelera', [InboxController::class, 'papelera'])->name('inbox.papelera')->whereNumber('mensaje')->middleware('permission:inbox.view');
 
         Route::get('user', CurrentUserController::class)->name('user');

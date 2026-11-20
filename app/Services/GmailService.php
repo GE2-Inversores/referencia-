@@ -12,6 +12,7 @@ use DirectoryTree\ImapEngine\Mailbox;
 use DirectoryTree\ImapEngine\MessageInterface as ImapMessage;
 use DirectoryTree\ImapEngine\MessageQueryInterface;
 use DirectoryTree\ImapEngine\Support\BodyPartDecoder;
+use DirectoryTree\ImapEngine\Support\Str as ImapStr;
 use Google\Client;
 use Google\Service\Gmail;
 use Google\Service\Gmail\Label;
@@ -1085,6 +1086,43 @@ class GmailService
         }
 
         return $etiquetas !== [] ? $etiquetas : ($mensaje->flags() ?: null);
+    }
+
+    /**
+     * Las etiquetas que existen en el buzón: por IMAP Gmail las expone como
+     * carpetas sin marca de sistema ("Población objeto"…); por la API son
+     * las etiquetas type=user. Alimenta las sugerencias del selector de la
+     * Bandeja — si el buzón no responde, queda solo la lista de la base.
+     *
+     * @return array<int, string>
+     */
+    public function etiquetasDelBuzon(): array
+    {
+        if (! $this->configurado()) {
+            return [];
+        }
+
+        try {
+            if ($this->esImap()) {
+                $sistema = ['\Noselect', '\All', '\Trash', '\Sent', '\Drafts', '\Junk', '\Spam', '\Important', '\Archive', '\Flagged', '\Marked', '\Unmarked'];
+
+                return $this->imapMailbox()->folders()->get()
+                    ->filter(fn (FolderInterface $c): bool => $c->path() !== '' && strtoupper($c->path()) !== 'INBOX' && array_intersect($c->flags(), $sistema) === [])
+                    ->map(fn (FolderInterface $c): string => ImapStr::fromImapUtf7($c->path()))
+                    ->filter()
+                    ->values()
+                    ->all();
+            }
+
+            return collect($this->gmail()->users_labels->listUsersLabels('me')->getLabels() ?? [])
+                ->filter(fn (Label $l): bool => $l->getType() === 'user')
+                ->map(fn (Label $l): string => (string) $l->getName())
+                ->filter()
+                ->values()
+                ->all();
+        } catch (Throwable) {
+            return [];
+        }
     }
 
     /**
