@@ -353,7 +353,7 @@ const datosSeg = computed<InformeCompleto>(() => informeSeg.value ?? informe.val
 // Filtro propio de «Correos de la bandeja» (por defecto, hoy), independiente del informe y del seguimiento.
 const hoyIso = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
 const rangoCorreos = ref<[string, string] | null>([hoyIso, hoyIso]);
-const correosDatos = ref({ total: 0, gestionados: 0, negados: 0, eliminados: 0, contestados: 0 });
+const correosDatos = ref({ total: 0, gestionados: 0, negados: 0, pendientes: 0, eliminados: 0, contestados: 0 });
 
 async function cargarCorreos(): Promise<void> {
   try {
@@ -371,6 +371,7 @@ const tarjetasCorreos = computed(() => {
     { label: 'Correos totales', valor: c.total, clase: 'inf-ind-blue', icono: MailIcon, ayuda: 'Todos los correos que llegaron al buzón en el período' },
     { label: 'Correos gestionados', valor: c.gestionados, clase: 'inf-ind-green', icono: MailCheckIcon, ayuda: 'Radicados como solicitud o reenviados' },
     { label: 'Correos negados', valor: c.negados, clase: 'inf-ind-red', icono: MailXIcon, ayuda: 'Solicitudes negadas desde la bandeja' },
+    { label: 'Pendientes en bandeja', valor: c.pendientes, clase: 'inf-ind-orange', icono: HourglassIcon, ayuda: 'Siguen en la bandeja sin gestionar; la limpieza de medianoche los pasa a eliminados' },
     { label: 'Correos eliminados', valor: c.eliminados, clase: 'inf-ind-gray', icono: TrashIcon, ayuda: 'Borrados a mano o descartados por la limpieza de medianoche' },
     { label: 'Correos con respuesta', valor: c.contestados, clase: 'inf-ind-teal', icono: ReplyIcon, ayuda: 'Contestados con el botón «Contestar»' },
   ];
@@ -688,6 +689,7 @@ onMounted(() => { void cargarCorreos(); void cargar(); });
 .inf-seg-hint { color: #94a3b8; font-size: 10px; font-weight: 600; }
 .inf-head-space { margin-left: auto; }
 .inf-hero > .inf-panel.inf-correos { z-index: 20; overflow: visible; }
+.inf-hero > .inf-panel:nth-child(4) { grid-column: 1 / -1; }
 .inf-seg-row { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: stretch; }
 .inf-seg-left { display: flex; align-items: center; gap: 20px; padding: 10px 18px; border: 1px solid #c3d6f2; border-radius: 13px; background: linear-gradient(150deg, #f1f7ff, #f9fcff); }
 .dark .inf-seg-left { border-color: #2c3f5e; background: #131a28; }
@@ -754,7 +756,7 @@ onMounted(() => { void cargarCorreos(); void cargar(); });
 @media (max-width: 900px) { .inf-esp { grid-template-columns: repeat(2, minmax(0,1fr)); } }
 
 /* ── Rejillas ── */
-.inf-hero { display: grid; grid-template-columns: minmax(0,1.05fr) minmax(0,.8fr) minmax(0,.8fr) minmax(0,1.45fr); gap: 6px; margin-bottom: 6px; align-items: stretch; }
+.inf-hero { display: grid; grid-template-columns: minmax(0,1.5fr) minmax(0,1fr) minmax(0,1fr); gap: 6px; margin-bottom: 6px; align-items: stretch; }
 .inf-hero .inf-panel { display: flex; flex-direction: column; }
 .inf-hero .inf-panel > :last-child { flex: 1; min-height: 0; }
 .inf-hero > .inf-panel { margin-bottom: 0; }
@@ -762,7 +764,7 @@ onMounted(() => { void cargarCorreos(); void cargar(); });
 .inf-grid > .inf-panel { margin-bottom: 0; }
 .inf-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .inf-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-@media (max-width: 1200px) { .inf-hero { grid-template-columns: repeat(2, minmax(0,1fr)); } .inf-grid-4 { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+@media (max-width: 1200px) { .inf-hero { grid-template-columns: repeat(2, minmax(0,1fr)); } .inf-hero > .inf-panel:first-child { grid-column: 1 / -1; } .inf-grid-4 { grid-template-columns: repeat(2, minmax(0,1fr)); } }
 @media (max-width: 1000px) { .inf-grid { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { .inf-hero, .inf-grid-4 { grid-template-columns: 1fr; } }
 

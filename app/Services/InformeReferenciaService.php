@@ -274,7 +274,7 @@ class InformeReferenciaService
      * diarios (la limpieza borra los correos, no los números); gestionados y
      * negados se cuentan de los correos que sí se conservan.
      *
-     * @return array{total: int, gestionados: int, negados: int, eliminados: int, contestados: int}
+     * @return array{total: int, gestionados: int, negados: int, pendientes: int, eliminados: int, contestados: int}
      */
     public function correos(CarbonInterface $desde, CarbonInterface $hasta): array
     {
@@ -291,6 +291,7 @@ class InformeReferenciaService
             'total' => (int) $contadores?->recibidos,
             'gestionados' => (clone $enPeriodo)->whereIn('gestion', ['radicada', 'reenviada'])->count(),
             'negados' => (clone $enPeriodo)->where('gestion', 'negada')->count(),
+            'pendientes' => (clone $enPeriodo)->whereNull('gestion')->count(),
             'eliminados' => (int) $contadores?->eliminados,
             'contestados' => (int) $contadores?->contestados,
         ];

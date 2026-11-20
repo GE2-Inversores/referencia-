@@ -98,7 +98,7 @@ class InformeReferenciasTest extends TestCase
 
         $this->actingAs($staff)->getJson('/api/informes/correos')
             ->assertOk()
-            ->assertJsonPath('data', ['total' => 7, 'gestionados' => 0, 'negados' => 0, 'eliminados' => 2, 'contestados' => 1]);
+            ->assertJsonPath('data', ['total' => 7, 'gestionados' => 0, 'negados' => 0, 'pendientes' => 0, 'eliminados' => 2, 'contestados' => 1]);
 
         $this->actingAs($staff)->getJson('/api/informes/correos?desde='.now()->subDays(3)->toDateString().'&hasta='.now()->toDateString())
             ->assertOk()
@@ -136,7 +136,7 @@ class InformeReferenciasTest extends TestCase
         $this->actingAs($this->staff())
             ->getJson('/api/informes?desde=2026-11-01&hasta=2026-11-30')
             ->assertOk()
-            ->assertJsonPath('data.correos', ['total' => 1000, 'gestionados' => 2, 'negados' => 1, 'eliminados' => 350, 'contestados' => 100]);
+            ->assertJsonPath('data.correos', ['total' => 1000, 'gestionados' => 2, 'negados' => 1, 'pendientes' => 0, 'eliminados' => 350, 'contestados' => 100]);
     }
 
     public function test_no_red_card_groups_insurers_without_the_contract_type(): void
