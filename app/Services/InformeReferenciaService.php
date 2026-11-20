@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\InboxEstadistica;
+use App\Models\InboxMensaje;
 use App\Models\SolicitudReferencia;
 use Carbon\CarbonInterface;
 use Carbon\CarbonPeriod;
@@ -90,8 +92,10 @@ class InformeReferenciaService
             'por_origen' => $this->desglose($solicitudes, fn (SolicitudReferencia $s): string => $s->origen === 'correo' ? 'Correo' : 'Aplicativo'),
             'por_dia' => $this->porDia($solicitudes, $desde, $hasta),
             'tiempo_respuesta' => $this->tiempoRespuesta($solicitudes),
+            'correos' => $this->correos($desde, $hasta),
             'anterior' => $this->periodoAnterior($desde, $hasta),
             'detalle_aceptadas' => $this->detalleAceptadas($solicitudes->whereIn('estado', ['en_espera', 'completado'])),
+            'detalle_pendientes' => $this->detallePendientes($solicitudes->where('estado', 'pendiente_cama')),
             'detalle_negadas' => [
                 'por_eps' => $this->conteo($negadas, fn (SolicitudReferencia $s): string => $s->eps ?: 'Sin EPS'),
                 'por_especialidad' => $this->conteo($negadas, fn (SolicitudReferencia $s): string => $s->especialidad_requerida ?: 'Sin especialidad'),
@@ -265,6 +269,34 @@ class InformeReferenciaService
     }
 
     /**
+     * Movimiento de la Bandeja de correo en el período, por fecha de llegada
+     * del correo. Recibidos, eliminados y contestados salen de los contadores
+     * diarios (la limpieza borra los correos, no los números); gestionados y
+     * negados se cuentan de los correos que sí se conservan.
+     *
+     * @return array{total: int, gestionados: int, negados: int, eliminados: int, contestados: int}
+     */
+    private function correos(CarbonInterface $desde, CarbonInterface $hasta): array
+    {
+        $contadores = InboxEstadistica::query()
+            ->whereBetween('fecha', [$desde->toDateString(), $hasta->toDateString()])
+            ->selectRaw('COALESCE(SUM(recibidos), 0) AS recibidos, COALESCE(SUM(eliminados), 0) AS eliminados, COALESCE(SUM(contestados), 0) AS contestados')
+            ->first();
+
+        $enPeriodo = InboxMensaje::query()
+            ->where('recibido_en', '>=', $desde->copy()->startOfDay())
+            ->where('recibido_en', '<', $hasta->copy()->addDay()->startOfDay());
+
+        return [
+            'total' => (int) $contadores?->recibidos,
+            'gestionados' => (clone $enPeriodo)->whereIn('gestion', ['radicada', 'reenviada'])->count(),
+            'negados' => (clone $enPeriodo)->where('gestion', 'negada')->count(),
+            'eliminados' => (int) $contadores?->eliminados,
+            'contestados' => (int) $contadores?->contestados,
+        ];
+    }
+
+    /**
      * @param  Collection<int, SolicitudReferencia>  $solicitudes
      * @return array<int, array{estado: string, label: string, total: int, pct: float}>
      */
@@ -381,14 +413,15 @@ class InformeReferenciaService
      * @param  Collection<int, SolicitudReferencia>  $aceptadas
      * @return array<int, array{nombre: string, total: int, aceptado: int, completadas: int, pct: float}>
      */
-    private function serviciosLlegada(Collection $aceptadas): array
+    private function serviciosLlegada(Collection $aceptadas, ?callable $lugar = null): array
     {
+        $lugar ??= fn (SolicitudReferencia $s): ?string => $s->lugar_llegada;
         $total = $aceptadas->count();
         $orden = [...self::SERVICIOS, 'Otros', 'Sin datos'];
         $conteos = array_fill_keys($orden, ['total' => 0, 'aceptado' => 0, 'completadas' => 0]);
 
         foreach ($aceptadas as $s) {
-            $servicio = $this->clasificarServicio($s->lugar_llegada);
+            $servicio = $this->clasificarServicio($lugar($s));
             $conteos[$servicio]['total']++;
             if ($s->estado === 'en_espera') {
                 $conteos[$servicio]['aceptado']++;
@@ -596,6 +629,24 @@ class InformeReferenciaService
             'por_sede' => $this->conteo($aceptadas, fn (SolicitudReferencia $s): string => $mayusculas($s->sede, 'SIN SEDE REGISTRADA')),
             'por_servicio' => $this->serviciosLlegada($aceptadas),
             'por_especialidad' => $this->conteo($aceptadas, fn (SolicitudReferencia $s): string => $s->especialidad_requerida ?: 'Sin especialidad'),
+        ];
+    }
+
+    /**
+     * A qué servicio va cada solicitud que sigue pendiente (aún no tiene
+     * lugar de llegada): se toma el servicio de remisión registrado.
+     *
+     * @param  Collection<int, SolicitudReferencia>  $pendientes
+     * @return array{total: int, por_servicio: array<int, array<string, int|float|string>>}
+     */
+    private function detallePendientes(Collection $pendientes): array
+    {
+        return [
+            'total' => $pendientes->count(),
+            'por_servicio' => $this->serviciosLlegada(
+                $pendientes,
+                fn (SolicitudReferencia $s): ?string => $s->servicio_remision ?: $s->servicio_ubicacion_actual,
+            ),
         ];
     }
 

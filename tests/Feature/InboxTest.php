@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\InboxEstadistica;
 use App\Models\InboxMensaje;
 use App\Models\Setting;
 use App\Models\SolicitudReferencia;
@@ -482,6 +483,39 @@ class InboxTest extends TestCase
                 ->assertJsonCount(1, 'data')
                 ->assertJsonPath('data.0.id', $pendiente->id);
         }
+    }
+
+    public function test_los_contadores_diarios_cuentan_por_dia_de_llegada(): void
+    {
+        $staff = $this->staff();
+        $llegada = now()->subDays(2)->setTime(10, 0);
+        $a = $this->correo(['recibido_en' => $llegada]);
+        $b = $this->correo(['recibido_en' => $llegada]);
+
+        // Contestar dos veces el mismo correo cuenta una sola vez.
+        $this->actingAs($staff)->postJson("/api/inbox/{$a->id}/responder", ['cuerpo' => 'Uno'])->assertOk();
+        $this->actingAs($staff)->postJson("/api/inbox/{$a->id}/responder", ['cuerpo' => 'Dos'])->assertOk();
+        $this->actingAs($staff)->postJson("/api/inbox/{$b->id}/papelera")->assertOk();
+
+        $fila = InboxEstadistica::where('fecha', $llegada->toDateString())->firstOrFail();
+        $this->assertSame(1, $fila->contestados);
+        $this->assertSame(1, $fila->eliminados);
+        $this->assertNull(InboxEstadistica::where('fecha', now()->toDateString())->first());
+    }
+
+    public function test_la_limpieza_de_medianoche_deja_el_numero_de_descartados(): void
+    {
+        $llegada = now()->subDay()->setTime(9, 0);
+        $descartado = $this->correo(['recibido_en' => $llegada]);
+        $this->correo(['recibido_en' => $llegada]);
+        $gestionado = $this->correo(['recibido_en' => $llegada, 'gestion' => 'radicada', 'carpeta' => 'Gestionados']);
+        InboxMensaje::query()->update(['created_at' => now()->subDay()]);
+
+        $this->artisan('inbox:prune')->assertSuccessful();
+
+        $this->assertModelMissing($descartado);
+        $this->assertModelExists($gestionado);
+        $this->assertSame(2, InboxEstadistica::where('fecha', $llegada->toDateString())->value('eliminados'));
     }
 
     public function test_eliminar_un_correo_lo_borra_definitivamente_y_no_se_reimporta(): void

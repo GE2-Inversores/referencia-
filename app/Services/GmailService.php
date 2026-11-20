@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use App\Models\InboxEstadistica;
 use App\Models\InboxMensaje;
 use App\Models\Notification;
 use App\Models\Setting;
 use App\Models\User;
+use Carbon\CarbonInterface;
 use DirectoryTree\ImapEngine\BodyStructurePart;
 use DirectoryTree\ImapEngine\FolderInterface;
 use DirectoryTree\ImapEngine\Mailbox;
@@ -892,7 +894,7 @@ class GmailService
         $datos['thread_id'] ??= $this->resolverHilo($datos);
 
         try {
-            InboxMensaje::create($datos);
+            InboxEstadistica::sumar('recibidos', InboxMensaje::create($datos)->recibido_en);
 
             return;
         } catch (Throwable $e) {
@@ -900,7 +902,7 @@ class GmailService
         }
 
         try {
-            InboxMensaje::create($this->sanear($datos));
+            InboxEstadistica::sumar('recibidos', InboxMensaje::create($this->sanear($datos))->recibido_en);
 
             return;
         } catch (Throwable $e) {
@@ -913,7 +915,52 @@ class GmailService
         $minimo['adjuntos'] = null;
         $minimo['etiquetas'] = null;
 
-        InboxMensaje::create($minimo);
+        InboxEstadistica::sumar('recibidos', InboxMensaje::create($minimo)->recibido_en);
+    }
+
+    /**
+     * Cuántos correos llegaron a Gmail cada día del rango (sin enviados ni
+     * borradores), para rellenar el histórico de los contadores. Los días
+     * sin correos quedan en 0; se usa la hora del servidor para el corte.
+     *
+     * @return array<string, int> fecha (Y-m-d) => correos recibidos
+     */
+    public function contarRecibidosPorDia(CarbonInterface $desde, CarbonInterface $hasta): array
+    {
+        $dias = [];
+        for ($dia = $desde->copy()->startOfDay(); $dia->lte($hasta); $dia->addDay()) {
+            $dias[$dia->toDateString()] = $dia->copy();
+        }
+
+        $consulta = fn (CarbonInterface $dia): string => 'after:'.$dia->timestamp.' before:'.$dia->copy()->addDay()->timestamp.' -in:sent -in:drafts';
+        $conteos = [];
+
+        if ($this->esImap()) {
+            $buzon = $this->imapMailbox();
+            $todos = $this->carpetaTodos($buzon) ?? throw new RuntimeException('No se encontró la carpeta «Todos» del buzón.');
+            $todos->select(true);
+
+            foreach ($dias as $fecha => $dia) {
+                $respuesta = $buzon->connection()->search(['X-GM-RAW', '"'.$consulta($dia).'"']);
+                $conteos[$fecha] = collect($respuesta->tokensAfter(2))->count();
+            }
+
+            return $conteos;
+        }
+
+        $gmail = $this->gmail();
+        foreach ($dias as $fecha => $dia) {
+            $total = 0;
+            $pagina = null;
+            do {
+                $lista = $gmail->users_messages->listUsersMessages('me', array_filter(['q' => $consulta($dia), 'maxResults' => 500, 'pageToken' => $pagina]));
+                $total += count($lista->getMessages() ?? []);
+                $pagina = $lista->getNextPageToken();
+            } while ($pagina);
+            $conteos[$fecha] = $total;
+        }
+
+        return $conteos;
     }
 
     /**

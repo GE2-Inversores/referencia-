@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\InboxEstadistica;
+use App\Models\InboxMensaje;
 use App\Models\SolicitudReferencia;
 use App\Models\User;
 use App\Support\XlsxWriter;
@@ -86,6 +88,40 @@ class InformeReferenciasTest extends TestCase
             ->assertJsonCount(4, 'data.casos_negados');
 
         $this->assertSame(2, collect($respuesta->json('data.grupos_negacion'))->firstWhere('grupo', 'poblacion_objeto')['total']);
+    }
+
+    public function test_pending_requests_are_broken_down_by_destination_service(): void
+    {
+        $this->solicitud('pendiente_cama', '2026-11-03', ['servicio_remision' => 'UCI']);
+        $this->solicitud('pendiente_cama', '2026-11-04', ['servicio_remision' => 'Urgencias adultos']);
+        $this->solicitud('pendiente_cama', '2026-11-05', ['servicio_remision' => 'UCI']);
+        $this->solicitud('pendiente', '2026-11-05', ['servicio_remision' => 'UCI']);
+
+        $respuesta = $this->actingAs($this->staff())
+            ->getJson('/api/informes?desde=2026-11-01&hasta=2026-11-30')
+            ->assertOk()
+            ->assertJsonPath('data.detalle_pendientes.total', 3);
+
+        $porServicio = collect($respuesta->json('data.detalle_pendientes.por_servicio'))->pluck('total', 'nombre');
+        $this->assertSame(2, $porServicio['UCI']);
+        $this->assertSame(1, $porServicio['URGENCIAS']);
+    }
+
+    public function test_report_includes_the_mailbox_movement_for_the_period(): void
+    {
+        InboxEstadistica::create(['fecha' => '2026-11-18', 'recibidos' => 480, 'eliminados' => 150, 'contestados' => 40]);
+        InboxEstadistica::create(['fecha' => '2026-11-19', 'recibidos' => 520, 'eliminados' => 200, 'contestados' => 60]);
+        InboxEstadistica::create(['fecha' => '2026-10-01', 'recibidos' => 999]);
+        $base = ['gmail_id' => 'x', 'remitente' => 'a', 'remitente_email' => 'a@b.co', 'asunto' => 'A', 'recibido_en' => '2026-11-18 10:00:00'];
+        InboxMensaje::create(array_merge($base, ['gmail_id' => '1', 'thread_id' => '1', 'gestion' => 'radicada']));
+        InboxMensaje::create(array_merge($base, ['gmail_id' => '2', 'thread_id' => '2', 'gestion' => 'reenviada']));
+        InboxMensaje::create(array_merge($base, ['gmail_id' => '3', 'thread_id' => '3', 'gestion' => 'negada']));
+        InboxMensaje::create(array_merge($base, ['gmail_id' => '4', 'thread_id' => '4', 'recibido_en' => '2026-10-01 10:00:00', 'gestion' => 'radicada']));
+
+        $this->actingAs($this->staff())
+            ->getJson('/api/informes?desde=2026-11-01&hasta=2026-11-30')
+            ->assertOk()
+            ->assertJsonPath('data.correos', ['total' => 1000, 'gestionados' => 2, 'negados' => 1, 'eliminados' => 350, 'contestados' => 100]);
     }
 
     public function test_no_red_card_groups_insurers_without_the_contract_type(): void

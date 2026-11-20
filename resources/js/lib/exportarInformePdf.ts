@@ -13,6 +13,7 @@ export interface InformeDatos {
   periodo: { desde: string; hasta: string };
   generado_en: string;
   resumen: Record<string, number>;
+  correos: { total: number; gestionados: number; negados: number; eliminados: number; contestados: number };
   por_estado: { label: string; total: number; pct: number }[];
   grupos_negacion: { label: string; total: number; pct: number }[];
   motivos_negacion: { grupo: string; motivo: string; total: number; pct: number }[];

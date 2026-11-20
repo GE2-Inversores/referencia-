@@ -2,9 +2,11 @@
 
 namespace App\Console\Commands;
 
+use App\Models\InboxEstadistica;
 use App\Models\InboxMensaje;
 use App\Services\GmailService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Carbon;
 
 class InboxPrune extends Command
 {
@@ -17,9 +19,16 @@ class InboxPrune extends Command
         $dias = max(0, (int) $this->option('dias'));
         $limite = now()->subDays($dias)->startOfDay();
 
-        $borrados = InboxMensaje::whereNull('gestion')
-            ->where('created_at', '<', $limite)
-            ->delete();
+        $pendientes = InboxMensaje::whereNull('gestion')->where('created_at', '<', $limite);
+
+        // Antes de borrar se deja el número: por día de llegada, para que el
+        // informe muestre cuántos se descartaron sin guardar ningún correo.
+        $pendientes->clone()
+            ->get(['id', 'recibido_en', 'created_at'])
+            ->groupBy(fn (InboxMensaje $m): string => ($m->recibido_en ?? $m->created_at)->toDateString())
+            ->each(fn ($grupo, string $dia) => InboxEstadistica::sumar('eliminados', Carbon::parse($dia), $grupo->count()));
+
+        $borrados = $pendientes->delete();
 
         app(GmailService::class)->marcarCorteDelDia();
 

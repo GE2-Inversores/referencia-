@@ -60,7 +60,11 @@
             </div>
           </div>
           <div class="inf-seg-cards">
-            <div v-for="c in tarjetasSeguimiento" :key="c.label" class="inf-seg-card" :class="c.clase">
+            <div
+              v-for="c in tarjetasSeguimiento" :key="c.label" class="inf-seg-card" :class="[c.clase, { 'inf-seg-click': c.clave, 'inf-seg-activa': c.clave && c.clave === detalleSeg }]"
+              :title="c.clave ? 'Clic para ver el detalle' : undefined"
+              @click="c.clave && abrirDetalleSeg(c.clave)"
+            >
               <span class="inf-seg-icon"><component :is="c.icono" class="w-4 h-4" /></span>
               <div class="inf-seg-body">
                 <span>{{ c.label }}</span>
@@ -70,6 +74,37 @@
             </div>
           </div>
         </div>
+        <div v-if="detalleSegActual" class="inf-seg-detalle">
+          <header>
+            <strong>{{ detalleSegActual.titulo }}</strong>
+            <button type="button" class="inf-btn inf-btn-icon" title="Cerrar" @click="detalleSeg = null"><component :is="XIcon" class="w-4 h-4" /></button>
+          </header>
+          <ul v-if="detalleSegActual.filas.length" class="inf-cat">
+            <li v-for="f in detalleSegActual.filas" :key="f.nombre">
+              <span class="inf-cat-name" :title="f.nombre">{{ f.nombre }}</span>
+              <span class="inf-bar"><span :class="detalleSegActual.barra" :style="{ width: Math.max(f.pct, 2) + '%' }"></span></span>
+              <strong>{{ f.total }}</strong>
+              <span class="inf-cat-pct" :class="detalleSegActual.pill">{{ fmtPct(f.pct) }}</span>
+            </li>
+          </ul>
+          <p v-else class="inf-empty">Sin registros en el período.</p>
+        </div>
+      </section>
+
+      <!-- ── Correos de la bandeja ── -->
+      <section class="inf-panel inf-t-indigo inf-correos">
+        <header class="inf-head-panel">
+          <span class="inf-panel-icon"><component :is="MailIcon" class="w-3.5 h-3.5" /></span>
+          <h2>Correos de la bandeja</h2>
+          <small class="inf-seg-hint">Todo lo que llega, no solo lo gestionado · mismo período del seguimiento diario</small>
+        </header>
+        <ul class="inf-indicators inf-ind-fila">
+          <li v-for="c in tarjetasCorreos" :key="c.label" :title="c.ayuda">
+            <span class="inf-ind-icon" :class="c.clase"><component :is="c.icono" class="w-3.5 h-3.5" /></span>
+            <span class="inf-ind-label">{{ c.label }}</span>
+            <span class="inf-ind-pill" :class="c.clase">{{ c.valor }}</span>
+          </li>
+        </ul>
       </section>
 
       <!-- ── Estados + Resumen ── -->
@@ -264,6 +299,10 @@ import {
   ClipboardList as ClipboardIcon,
   Cross as CrossIcon,
   Layers as LayersIcon,
+  MailCheck as MailCheckIcon,
+  MailX as MailXIcon,
+  Reply as ReplyIcon,
+  Trash2 as TrashIcon,
   PieChart as PieIcon,
   RefreshCw as RefreshIcon,
   ShieldCheck as ShieldIcon,
@@ -284,6 +323,7 @@ interface InformeCompleto extends InformeDatos {
   por_dia: { fecha: string; recibidas: number; aceptadas: number; completadas: number; negadas: number; canceladas: number; no_efectivos?: number }[];
   por_municipio: { nombre: string; total: number; aceptado: number; completadas: number; pct: number }[];
   poblacion: { objeto: number; no_red: number };
+  detalle_pendientes?: { total: number; por_servicio: { nombre: string; total: number; pct: number }[] };
   motivos_poblacion: { motivo: string; total: number; pct: number }[];
   motivos_no_red: { motivo: string; total: number; pct: number }[];
   no_red_por_eps: { nombre: string; total: number; pct: number }[];
@@ -310,6 +350,18 @@ const rangoSeg = ref<[string, string] | null>(null);
 const cargandoSeg = ref(false);
 
 const datosSeg = computed<InformeCompleto>(() => informeSeg.value ?? informe.value!);
+
+const tarjetasCorreos = computed(() => {
+  const c = datosSeg.value.correos ?? { total: 0, gestionados: 0, negados: 0, eliminados: 0, contestados: 0 };
+
+  return [
+    { label: 'Correos totales', valor: c.total, clase: 'inf-ind-blue', icono: MailIcon, ayuda: 'Todos los correos que llegaron al buzón en el período' },
+    { label: 'Correos gestionados', valor: c.gestionados, clase: 'inf-ind-green', icono: MailCheckIcon, ayuda: 'Radicados como solicitud o reenviados' },
+    { label: 'Correos negados', valor: c.negados, clase: 'inf-ind-red', icono: MailXIcon, ayuda: 'Solicitudes negadas desde la bandeja' },
+    { label: 'Correos eliminados', valor: c.eliminados, clase: 'inf-ind-gray', icono: TrashIcon, ayuda: 'Borrados a mano o descartados por la limpieza de medianoche' },
+    { label: 'Correos con respuesta', valor: c.contestados, clase: 'inf-ind-teal', icono: ReplyIcon, ayuda: 'Contestados con el botón «Contestar»' },
+  ];
+});
 const cargando = ref(false);
 const error = ref('');
 
@@ -428,14 +480,37 @@ const motivosNoIngresoNoRed = computed(() => (informe.value?.no_red_por_eps ?? [
 const tarjetasSeguimiento = computed(() => {
   const r = datosSeg.value?.resumen;
   if (!r) return [];
-  const card = (label: string, valor: number, icono: Component, clase: string) => ({ label, valor, icono, clase, pct: fmtPct(pctDe(valor, r.total)) });
+  const card = (label: string, valor: number, icono: Component, clase: string, clave?: ClaveDetalleSeg) => ({ label, valor, icono, clase, clave, pct: fmtPct(pctDe(valor, r.total)) });
   return [
-    card('Pendiente por aceptar', r.pendientes_cupo, HourglassIcon, 'seg-amber'),
-    card('Pacientes aceptados', r.aceptadas, CheckIcon, 'seg-green'),
+    card('Pendiente por aceptar', r.pendientes_cupo, HourglassIcon, 'seg-amber', 'pendientes'),
+    card('Pacientes aceptados', r.aceptadas, CheckIcon, 'seg-green', 'aceptados'),
     card('Ingresos efectivos', r.ingresos_efectivos, BedIcon, 'seg-blue'),
-    card('Ingresos no efectivos', r.negadas_no_ingreso, UserXIcon, 'seg-rose'),
+    card('Ingresos no efectivos', r.negadas_no_ingreso, UserXIcon, 'seg-rose', 'no_efectivos'),
     card('Pacientes negados', r.negadas, XIcon, 'seg-red'),
   ];
+});
+
+type ClaveDetalleSeg = 'pendientes' | 'aceptados' | 'no_efectivos';
+const detalleSeg = ref<ClaveDetalleSeg | null>(null);
+
+function abrirDetalleSeg(clave: ClaveDetalleSeg): void {
+  detalleSeg.value = detalleSeg.value === clave ? null : clave;
+}
+
+/** Desglose de la tarjeta del seguimiento que esté abierta (solo filas con casos). */
+const detalleSegActual = computed(() => {
+  const d = datosSeg.value;
+  if (!detalleSeg.value || !d) return null;
+  const porServicio = (filas: { nombre: string; total: number; pct: number }[]) => filas.filter((f) => f.total > 0).map((f) => ({ nombre: f.nombre, total: f.total, pct: f.pct }));
+
+  switch (detalleSeg.value) {
+    case 'pendientes':
+      return { titulo: 'Pendiente por aceptar: ¿a qué servicio van?', barra: 'inf-bar-orange', pill: 'inf-cat-pill-orange', filas: porServicio(d.detalle_pendientes?.por_servicio ?? []) };
+    case 'aceptados':
+      return { titulo: 'Pacientes aceptados: ¿a qué servicio o lugar fueron?', barra: 'inf-bar-green', pill: 'inf-cat-pill-green', filas: porServicio(d.detalle_aceptadas.por_servicio) };
+    default:
+      return { titulo: 'Ingresos no efectivos: ¿por qué no ingresaron?', barra: 'inf-bar-red', pill: 'inf-cat-pill-red', filas: porServicio(d.motivos_no_ingreso.map((m) => ({ nombre: m.motivo, total: m.total, pct: m.pct }))) };
+  }
 });
 
 const comparacionTiempo = computed(() => {
@@ -617,6 +692,14 @@ onMounted(cargar);
 .inf-dot-orange { background: #fb923c; } .inf-dot-blue { background: #3b82f6; }
 .inf-seg-cards { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 6px; }
 .inf-seg-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 16px; border: 1px solid rgba(255,255,255,.35); box-shadow: 0 8px 24px rgba(22,70,142,.18); min-width: 0; transition: transform .15s ease, box-shadow .15s ease; }
+.inf-seg-click { cursor: pointer; }
+.inf-seg-activa { outline: 2px solid #1d4ed8; outline-offset: 1px; }
+.dark .inf-seg-activa { outline-color: #93c5fd; }
+.inf-seg-detalle { margin-top: 8px; padding: 8px 12px; border: 1px solid #86a5d8; border-radius: 12px; background: rgba(248,251,255,.8); }
+.dark .inf-seg-detalle { border-color: #263352; background: #1a2233; }
+.inf-seg-detalle > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; color: #0d2d5e; font-size: 12px; }
+.dark .inf-seg-detalle > header { color: #e2e8f0; }
+.inf-seg-detalle .inf-cat { max-height: 220px; }
 .inf-seg-card:hover { transform: translateY(-1px); box-shadow: 0 10px 26px rgba(22,70,142,.2); }
 .dark .inf-seg-card:hover { transform: none; }
 .dark .inf-seg-card { border-color: rgba(255,255,255,.18); }
@@ -750,6 +833,10 @@ onMounted(cargar);
 .inf-indicators li { display: flex; flex: 1; align-items: center; gap: 8px; padding: 5px 9px; border: 1px solid #86a5d8; border-radius: 12px; background: rgba(248,251,255,.8); transition: background .15s ease; }
 .inf-indicators li:hover { background: #f0f6ff; }
 .dark .inf-indicators li:hover { background: #1e2940; }
+.inf-correos { margin-bottom: 6px; }
+.inf-indicators.inf-ind-fila { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .inf-indicators.inf-ind-fila { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .inf-indicators.inf-ind-fila { grid-template-columns: 1fr; } }
 .inf-ind-icon { display: grid; width: 22px; height: 22px; flex-shrink: 0; place-items: center; border-radius: 8px; }
 .inf-ind-label { flex: 1; color: #334155; font-size: 11px; font-weight: 600; }
 .inf-ind-pill { min-width: 32px; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; text-align: center; }

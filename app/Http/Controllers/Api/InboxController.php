@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Clinica;
+use App\Models\InboxEstadistica;
 use App\Models\InboxMensaje;
 use App\Models\Notification;
 use App\Models\SolicitudReferencia;
@@ -190,6 +191,7 @@ class InboxController extends Controller
     public function papelera(InboxMensaje $mensaje, GmailService $gmail): JsonResponse
     {
         $gmail->registrarEliminado((string) $mensaje->gmail_id);
+        InboxEstadistica::sumar('eliminados', $mensaje->recibido_en);
         $mensaje->delete();
 
         return response()->json([
@@ -665,6 +667,10 @@ class InboxController extends Controller
             );
         } catch (Throwable) {
             return response()->json(['message' => 'No se pudo enviar la respuesta. Intente de nuevo en unos minutos.'], 503);
+        }
+
+        if ($mensaje->contestado_at === null) {
+            InboxEstadistica::sumar('contestados', $mensaje->recibido_en);
         }
 
         $mensaje->update([
