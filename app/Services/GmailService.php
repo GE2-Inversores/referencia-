@@ -919,6 +919,67 @@ class GmailService
     }
 
     /**
+     * Correos que Gmail cuenta en el día (misma consulta del relleno) y que no
+     * están en la base por Message-ID: sirve para entender por qué el total
+     * de Gmail supera lo que la Bandeja importó. Solo lectura, solo IMAP.
+     *
+     * @return array<int, array{uid: int, fecha: string, de: string, asunto: string}>
+     */
+    public function correosNoImportados(CarbonInterface $dia): array
+    {
+        if (! $this->esImap()) {
+            throw new RuntimeException('El diagnóstico solo está disponible en modo IMAP.');
+        }
+
+        $buzon = $this->imapMailbox();
+        $todos = $this->carpetaTodos($buzon) ?? throw new RuntimeException('No se encontró la carpeta «Todos» del buzón.');
+        $todos->select(true);
+
+        $inicio = $dia->copy()->startOfDay();
+        $consulta = 'after:'.$inicio->timestamp.' before:'.$inicio->copy()->addDay()->timestamp.' -in:sent -in:drafts';
+        $uids = collect($buzon->connection()->search(['X-GM-RAW', '"'.$consulta.'"'])->tokensAfter(2))->map->value->map(fn ($v): int => (int) $v);
+
+        // Los correos guardados antes de existir la columna message_id no la
+        // traen: también se reconocen por remitente + asunto + hora.
+        $huella = fn (?string $de, ?string $asunto, mixed $hora): string => mb_strtolower((string) $de).'|'.mb_substr(trim((string) $asunto), 0, 500).'|'.Carbon::parse($hora)->setTimezone(config('app.timezone'))->format('H:i');
+
+        $guardados = InboxMensaje::query()
+            ->where('recibido_en', '>=', $inicio)
+            ->where('recibido_en', '<', $inicio->copy()->addDay())
+            ->get(['message_id', 'remitente_email', 'asunto', 'recibido_en']);
+
+        $conocidos = $guardados->pluck('message_id')->filter()->flip();
+        $huellas = $guardados->mapWithKeys(fn (InboxMensaje $m): array => [$huella($m->remitente_email, $m->asunto, $m->recibido_en) => true]);
+
+        if ($uids->isEmpty()) {
+            return [];
+        }
+
+        // Una sola consulta con solo encabezados para todo el rango de UID del día.
+        $enRango = $todos->messages()->withHeaders()->withoutBody()->withoutFlags()->uid($uids->min(), $uids->max())->get();
+
+        $faltantes = [];
+        foreach ($enRango as $mensaje) {
+            if (! $uids->contains($mensaje->uid()) || $conocidos->has($mensaje->messageId())) {
+                continue;
+            }
+
+            if ($mensaje->date() && $huellas->has($huella($mensaje->from()?->email(), $mensaje->subject(), $mensaje->date()))) {
+                continue;
+            }
+
+            $faltantes[] = [
+                'uid' => $mensaje->uid(),
+                'fecha' => (string) $mensaje->date()?->setTimezone(config('app.timezone'))->format('H:i'),
+                'de' => (string) ($mensaje->from()?->email() ?? ''),
+                'asunto' => mb_substr((string) $mensaje->subject(), 0, 70),
+            ];
+        }
+
+        return $faltantes;
+    }
+
+    /**
      * Cuántos correos llegaron a Gmail cada día del rango (sin enviados ni
      * borradores), para rellenar el histórico de los contadores. Los días
      * sin correos quedan en 0; se usa la hora del servidor para el corte.
