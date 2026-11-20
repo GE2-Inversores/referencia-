@@ -67,8 +67,10 @@ class InboxEstadisticas extends Command
             return self::FAILURE;
         }
 
-        $this->table(['UID', 'Hora', 'De', 'Asunto'], array_map(fn (array $f): array => [$f['uid'], $f['fecha'], $f['de'], $f['asunto']], array_slice($faltantes, 0, 80)));
+        $this->table(['UID', 'En Entrada', 'Hora', 'De', 'Asunto'], array_map(fn (array $f): array => [$f['uid'], $f['entrada'] ? 'SI' : 'no', $f['fecha'], $f['de'], mb_substr($f['asunto'], 0, 45)], array_slice($faltantes, 0, 80)));
+        $enEntrada = count(array_filter($faltantes, fn (array $f): bool => $f['entrada']));
         $this->info(count($faltantes).' correo(s) de '.$dia->toDateString().' están en Gmail y no en la Bandeja (los eliminados a mano también aparecen).');
+        $this->info("De esos, {$enEntrada} siguen en la Entrada de Gmail y ".(count($faltantes) - $enEntrada).' ya no están en la Entrada (archivados o filtrados).');
 
         return self::SUCCESS;
     }

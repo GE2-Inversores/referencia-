@@ -325,12 +325,23 @@ class GmailService
         }
 
         foreach ($mailbox->folders()->get() as $carpeta) {
-            $carpeta->select(true);
-            $uids = collect($mailbox->connection()->search(['HEADER', 'Message-ID', $fragmento])->tokensAfter(2))
-                ->map->value;
+            // Gmail lista etiquetas que no se pueden abrir como carpeta
+            // (padres de otras etiquetas, borradas o renombradas): se saltan
+            // en vez de abortar toda la búsqueda.
+            if (in_array('\\Noselect', $carpeta->flags(), true)) {
+                continue;
+            }
 
-            if ($uids->isNotEmpty()) {
-                return $carpeta->messages()->find((int) $uids->first());
+            try {
+                $carpeta->select(true);
+                $uids = collect($mailbox->connection()->search(['HEADER', 'Message-ID', $fragmento])->tokensAfter(2))
+                    ->map->value;
+
+                if ($uids->isNotEmpty()) {
+                    return $carpeta->messages()->find((int) $uids->first());
+                }
+            } catch (Throwable) {
+                continue;
             }
         }
 
@@ -923,7 +934,7 @@ class GmailService
      * están en la base por Message-ID: sirve para entender por qué el total
      * de Gmail supera lo que la Bandeja importó. Solo lectura, solo IMAP.
      *
-     * @return array<int, array{uid: int, fecha: string, de: string, asunto: string}>
+     * @return array<int, array{uid: int, entrada: bool, fecha: string, de: string, asunto: string}>
      */
     public function correosNoImportados(CarbonInterface $dia): array
     {
@@ -955,6 +966,8 @@ class GmailService
             return [];
         }
 
+        $enEntrada = collect($buzon->connection()->search(['X-GM-RAW', '"'.$consulta.' in:inbox"'])->tokensAfter(2))->map->value->map(fn ($v): int => (int) $v);
+
         // Una sola consulta con solo encabezados para todo el rango de UID del día.
         $enRango = $todos->messages()->withHeaders()->withoutBody()->withoutFlags()->uid($uids->min(), $uids->max())->get();
 
@@ -970,6 +983,7 @@ class GmailService
 
             $faltantes[] = [
                 'uid' => $mensaje->uid(),
+                'entrada' => $enEntrada->contains($mensaje->uid()),
                 'fecha' => (string) $mensaje->date()?->setTimezone(config('app.timezone'))->format('H:i'),
                 'de' => (string) ($mensaje->from()?->email() ?? ''),
                 'asunto' => mb_substr((string) $mensaje->subject(), 0, 70),
