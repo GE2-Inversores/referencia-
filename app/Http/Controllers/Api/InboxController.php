@@ -191,7 +191,8 @@ class InboxController extends Controller
     public function papelera(InboxMensaje $mensaje, GmailService $gmail): JsonResponse
     {
         $gmail->registrarEliminado((string) $mensaje->gmail_id);
-        InboxEstadistica::sumar('eliminados', $mensaje->recibido_en);
+        // Un correo contestado sin gestionar cuenta como «con respuesta»; el resto, como eliminado.
+        InboxEstadistica::sumar($mensaje->contestado_at !== null && $mensaje->gestion === null ? 'contestados' : 'eliminados', $mensaje->recibido_en);
         $mensaje->delete();
 
         return response()->json([
@@ -667,10 +668,6 @@ class InboxController extends Controller
             );
         } catch (Throwable) {
             return response()->json(['message' => 'No se pudo enviar la respuesta. Intente de nuevo en unos minutos.'], 503);
-        }
-
-        if ($mensaje->contestado_at === null) {
-            InboxEstadistica::sumar('contestados', $mensaje->recibido_en);
         }
 
         $mensaje->update([

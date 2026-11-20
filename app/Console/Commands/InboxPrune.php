@@ -24,9 +24,14 @@ class InboxPrune extends Command
         // Antes de borrar se deja el número: por día de llegada, para que el
         // informe muestre cuántos se descartaron sin guardar ningún correo.
         $pendientes->clone()
-            ->get(['id', 'recibido_en', 'created_at'])
+            ->get(['id', 'recibido_en', 'created_at', 'contestado_at'])
             ->groupBy(fn (InboxMensaje $m): string => ($m->recibido_en ?? $m->created_at)->toDateString())
-            ->each(fn ($grupo, string $dia) => InboxEstadistica::sumar('eliminados', Carbon::parse($dia), $grupo->count()));
+            ->each(function ($grupo, string $dia): void {
+                $contestados = $grupo->whereNotNull('contestado_at')->count();
+
+                InboxEstadistica::sumar('contestados', Carbon::parse($dia), $contestados);
+                InboxEstadistica::sumar('eliminados', Carbon::parse($dia), $grupo->count() - $contestados);
+            });
 
         $borrados = $pendientes->delete();
 

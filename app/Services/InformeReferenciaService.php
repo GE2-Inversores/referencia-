@@ -271,9 +271,11 @@ class InformeReferenciaService
 
     /**
      * Movimiento de la Bandeja de correo en el período, por fecha de llegada
-     * del correo. Recibidos, eliminados y contestados salen de los contadores
-     * diarios (la limpieza borra los correos, no los números); gestionados y
-     * negados se cuentan de los correos que sí se conservan.
+     * del correo. Cada correo cae en una sola fila: gestionado, negado,
+     * contestado (sin gestionar), pendiente, eliminado o archivado en Gmail.
+     * Recibidos y lo que ya se borró salen de los contadores diarios (la
+     * limpieza borra los correos, no los números); el resto se cuenta de los
+     * correos que sí se conservan.
      *
      * @return array{total: int, gestionados: int, negados: int, pendientes: int, eliminados: int, archivados: int|null, contestados: int}
      */
@@ -292,10 +294,10 @@ class InformeReferenciaService
             'total' => (int) $contadores?->recibidos,
             'gestionados' => (clone $enPeriodo)->whereIn('gestion', ['radicada', 'reenviada'])->count(),
             'negados' => (clone $enPeriodo)->where('gestion', 'negada')->count(),
-            'pendientes' => (clone $enPeriodo)->whereNull('gestion')->count(),
+            'pendientes' => (clone $enPeriodo)->whereNull('gestion')->whereNull('contestado_at')->count(),
             'eliminados' => (int) $contadores?->eliminados,
             'archivados' => $this->archivadosEnGmail($desde, $hasta),
-            'contestados' => (int) $contadores?->contestados,
+            'contestados' => (int) $contadores?->contestados + (clone $enPeriodo)->whereNull('gestion')->whereNotNull('contestado_at')->count(),
         ];
     }
 
@@ -321,7 +323,7 @@ class InformeReferenciaService
 
         $contadores = InboxEstadistica::query()
             ->whereBetween('fecha', [$inicio->toDateString(), $hasta->toDateString()])
-            ->selectRaw('COALESCE(SUM(recibidos), 0) AS recibidos, COALESCE(SUM(eliminados), 0) AS eliminados')
+            ->selectRaw('COALESCE(SUM(recibidos), 0) AS recibidos, COALESCE(SUM(eliminados), 0) AS eliminados, COALESCE(SUM(contestados), 0) AS contestados')
             ->first();
 
         $guardados = InboxMensaje::query()
@@ -329,7 +331,7 @@ class InformeReferenciaService
             ->where('recibido_en', '<', $hasta->copy()->addDay()->startOfDay())
             ->count();
 
-        return max(0, (int) $contadores?->recibidos - $guardados - (int) $contadores?->eliminados);
+        return max(0, (int) $contadores?->recibidos - $guardados - (int) $contadores?->eliminados - (int) $contadores?->contestados);
     }
 
     /**

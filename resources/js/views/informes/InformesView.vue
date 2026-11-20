@@ -372,10 +372,10 @@ const tarjetasCorreos = computed(() => {
     { label: 'Correos totales', valor: c.total, clase: 'inf-ind-blue', icono: MailIcon, ayuda: 'Todos los correos que llegaron al buzón en el período' },
     { label: 'Correos gestionados', valor: c.gestionados, clase: 'inf-ind-green', icono: MailCheckIcon, ayuda: 'Radicados como solicitud o reenviados' },
     { label: 'Correos negados', valor: c.negados, clase: 'inf-ind-red', icono: MailXIcon, ayuda: 'Solicitudes negadas desde la bandeja' },
-    { label: 'Pendientes en bandeja', valor: c.pendientes, clase: 'inf-ind-orange', icono: HourglassIcon, ayuda: 'Siguen en la bandeja sin gestionar; la limpieza de medianoche los pasa a eliminados' },
+    { label: 'Pendientes en bandeja', valor: c.pendientes, clase: 'inf-ind-orange', icono: HourglassIcon, ayuda: 'Siguen en la bandeja sin gestionar ni contestar; la limpieza de medianoche los pasa a eliminados' },
     { label: 'Correos eliminados', valor: c.eliminados, clase: 'inf-ind-gray', icono: TrashIcon, ayuda: 'Borrados a mano o descartados por la limpieza de medianoche' },
     { label: 'Archivados en Gmail', valor: c.archivados ?? '—', clase: 'inf-ind-violet', icono: ArchiveIcon, ayuda: 'Llegaron al buzón y alguien los archivó en Gmail antes de que la bandeja los guardara. Se calcula desde el 20/11/2026' },
-    { label: 'Correos con respuesta', valor: c.contestados, clase: 'inf-ind-teal', icono: ReplyIcon, ayuda: 'Contestados con el botón «Contestar»' },
+    { label: 'Correos con respuesta', valor: c.contestados, clase: 'inf-ind-teal', icono: ReplyIcon, ayuda: 'Contestados con el botón «Contestar» y sin radicar ni negar. Se suma al total con las demás filas' },
   ];
 });
 const cargando = ref(false);

@@ -98,7 +98,7 @@ class InformeReferenciasTest extends TestCase
 
         $this->actingAs($staff)->getJson('/api/informes/correos')
             ->assertOk()
-            ->assertJsonPath('data', ['total' => 7, 'gestionados' => 0, 'negados' => 0, 'pendientes' => 0, 'eliminados' => 2, 'archivados' => 5, 'contestados' => 1]);
+            ->assertJsonPath('data', ['total' => 7, 'gestionados' => 0, 'negados' => 0, 'pendientes' => 0, 'eliminados' => 2, 'archivados' => 4, 'contestados' => 1]);
 
         $this->actingAs($staff)->getJson('/api/informes/correos?desde='.now()->subDays(3)->toDateString().'&hasta='.now()->toDateString())
             ->assertOk()
@@ -124,6 +124,24 @@ class InformeReferenciasTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.total', 500)
             ->assertJsonPath('data.archivados', null);
+    }
+
+    public function test_every_mailbox_row_adds_up_to_the_total(): void
+    {
+        InboxEstadistica::create(['fecha' => '2026-11-25', 'recibidos' => 10, 'eliminados' => 2, 'contestados' => 1]);
+        $base = ['remitente' => 'a', 'remitente_email' => 'a@b.co', 'asunto' => 'A', 'recibido_en' => '2026-11-25 10:00:00'];
+        InboxMensaje::create(array_merge($base, ['gmail_id' => '1', 'thread_id' => '1']));
+        InboxMensaje::create(array_merge($base, ['gmail_id' => '2', 'thread_id' => '2', 'contestado_at' => now()]));
+        InboxMensaje::create(array_merge($base, ['gmail_id' => '3', 'thread_id' => '3', 'gestion' => 'radicada', 'contestado_at' => now()]));
+
+        $datos = $this->actingAs($this->staff())->getJson('/api/informes/correos?desde=2026-11-25&hasta=2026-11-25')
+            ->assertOk()
+            ->assertJsonPath('data.pendientes', 1)
+            ->assertJsonPath('data.contestados', 2)
+            ->assertJsonPath('data.gestionados', 1)
+            ->json('data');
+
+        $this->assertSame($datos['total'], $datos['gestionados'] + $datos['negados'] + $datos['pendientes'] + $datos['contestados'] + $datos['eliminados'] + $datos['archivados']);
     }
 
     public function test_pending_requests_are_broken_down_by_destination_service(): void

@@ -489,13 +489,18 @@ class InboxTest extends TestCase
     {
         $staff = $this->staff();
         $llegada = now()->subDays(2)->setTime(10, 0);
-        $a = $this->correo(['recibido_en' => $llegada]);
-        $b = $this->correo(['recibido_en' => $llegada]);
+        $contestado = $this->correo(['recibido_en' => $llegada]);
+        $borrado = $this->correo(['recibido_en' => $llegada]);
+        $contestadoYBorrado = $this->correo(['recibido_en' => $llegada]);
 
-        // Contestar dos veces el mismo correo cuenta una sola vez.
-        $this->actingAs($staff)->postJson("/api/inbox/{$a->id}/responder", ['cuerpo' => 'Uno'])->assertOk();
-        $this->actingAs($staff)->postJson("/api/inbox/{$a->id}/responder", ['cuerpo' => 'Dos'])->assertOk();
-        $this->actingAs($staff)->postJson("/api/inbox/{$b->id}/papelera")->assertOk();
+        // Contestar solo marca el correo: mientras siga en la base se cuenta en vivo, no en el contador.
+        $this->actingAs($staff)->postJson("/api/inbox/{$contestado->id}/responder", ['cuerpo' => 'Uno'])->assertOk();
+        $this->assertNull(InboxEstadistica::where('fecha', $llegada->toDateString())->first());
+
+        // Borrar un correo sin contestar es «eliminado»; borrar uno contestado sigue siendo «con respuesta».
+        $this->actingAs($staff)->postJson("/api/inbox/{$borrado->id}/papelera")->assertOk();
+        $this->actingAs($staff)->postJson("/api/inbox/{$contestadoYBorrado->id}/responder", ['cuerpo' => 'Dos'])->assertOk();
+        $this->actingAs($staff)->postJson("/api/inbox/{$contestadoYBorrado->id}/papelera")->assertOk();
 
         $fila = InboxEstadistica::where('fecha', $llegada->toDateString())->firstOrFail();
         $this->assertSame(1, $fila->contestados);
@@ -508,6 +513,7 @@ class InboxTest extends TestCase
         $llegada = now()->subDay()->setTime(9, 0);
         $descartado = $this->correo(['recibido_en' => $llegada]);
         $this->correo(['recibido_en' => $llegada]);
+        $this->correo(['recibido_en' => $llegada, 'contestado_at' => now()]);
         $gestionado = $this->correo(['recibido_en' => $llegada, 'gestion' => 'radicada', 'carpeta' => 'Gestionados']);
         InboxMensaje::query()->update(['created_at' => now()->subDay()]);
 
@@ -515,7 +521,9 @@ class InboxTest extends TestCase
 
         $this->assertModelMissing($descartado);
         $this->assertModelExists($gestionado);
-        $this->assertSame(2, InboxEstadistica::where('fecha', $llegada->toDateString())->value('eliminados'));
+        $fila = InboxEstadistica::where('fecha', $llegada->toDateString())->firstOrFail();
+        $this->assertSame(2, $fila->eliminados);
+        $this->assertSame(1, $fila->contestados);
     }
 
     public function test_eliminar_un_correo_lo_borra_definitivamente_y_no_se_reimporta(): void

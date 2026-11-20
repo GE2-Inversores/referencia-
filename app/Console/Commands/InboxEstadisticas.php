@@ -3,7 +3,6 @@
 namespace App\Console\Commands;
 
 use App\Models\InboxEstadistica;
-use App\Models\InboxMensaje;
 use App\Services\GmailService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -42,17 +41,10 @@ class InboxEstadisticas extends Command
             $dia = Carbon::parse($fecha);
             InboxEstadistica::fijar('recibidos', $dia, $recibidos);
 
-            // Los contestados que aún están en la base (la limpieza borra el resto).
-            $contestados = InboxMensaje::whereNotNull('contestado_at')
-                ->whereDate('recibido_en', $fecha)
-                ->count();
-            $actual = (int) InboxEstadistica::where('fecha', $fecha)->value('contestados');
-            InboxEstadistica::fijar('contestados', $dia, max($actual, $contestados));
-
-            $this->line("{$fecha}: {$recibidos} recibidos".($contestados > 0 ? ", {$contestados} contestados" : ''));
+            $this->line("{$fecha}: {$recibidos} recibidos");
         }
 
-        $this->info('Contadores actualizados. Los eliminados de días anteriores no se pueden reconstruir y quedan en 0.');
+        $this->info('Contadores actualizados. Los eliminados y contestados ya borrados de días anteriores no se pueden reconstruir.');
 
         return self::SUCCESS;
     }
