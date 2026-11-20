@@ -98,11 +98,32 @@ class InformeReferenciasTest extends TestCase
 
         $this->actingAs($staff)->getJson('/api/informes/correos')
             ->assertOk()
-            ->assertJsonPath('data', ['total' => 7, 'gestionados' => 0, 'negados' => 0, 'pendientes' => 0, 'eliminados' => 2, 'contestados' => 1]);
+            ->assertJsonPath('data', ['total' => 7, 'gestionados' => 0, 'negados' => 0, 'pendientes' => 0, 'eliminados' => 2, 'archivados' => 5, 'contestados' => 1]);
 
         $this->actingAs($staff)->getJson('/api/informes/correos?desde='.now()->subDays(3)->toDateString().'&hasta='.now()->toDateString())
             ->assertOk()
             ->assertJsonPath('data.total', 107);
+    }
+
+    public function test_archived_in_gmail_is_received_minus_stored_minus_deleted(): void
+    {
+        InboxEstadistica::create(['fecha' => '2026-11-25', 'recibidos' => 10, 'eliminados' => 2]);
+        InboxEstadistica::create(['fecha' => '2026-11-10', 'recibidos' => 500]);
+        $base = ['remitente' => 'a', 'remitente_email' => 'a@b.co', 'asunto' => 'A', 'recibido_en' => '2026-11-25 10:00:00'];
+        InboxMensaje::create(array_merge($base, ['gmail_id' => '1', 'thread_id' => '1']));
+        InboxMensaje::create(array_merge($base, ['gmail_id' => '2', 'thread_id' => '2', 'gestion' => 'negada']));
+        $staff = $this->staff();
+
+        $this->actingAs($staff)->getJson('/api/informes/correos?desde=2026-11-25&hasta=2026-11-25')
+            ->assertOk()
+            ->assertJsonPath('data.total', 10)
+            ->assertJsonPath('data.archivados', 6);
+
+        // Antes del 20/11 los eliminados no se contaban: no se inventa una cifra.
+        $this->actingAs($staff)->getJson('/api/informes/correos?desde=2026-11-01&hasta=2026-11-12')
+            ->assertOk()
+            ->assertJsonPath('data.total', 500)
+            ->assertJsonPath('data.archivados', null);
     }
 
     public function test_pending_requests_are_broken_down_by_destination_service(): void
@@ -136,7 +157,7 @@ class InformeReferenciasTest extends TestCase
         $this->actingAs($this->staff())
             ->getJson('/api/informes?desde=2026-11-01&hasta=2026-11-30')
             ->assertOk()
-            ->assertJsonPath('data.correos', ['total' => 1000, 'gestionados' => 2, 'negados' => 1, 'pendientes' => 0, 'eliminados' => 350, 'contestados' => 100]);
+            ->assertJsonPath('data.correos', ['total' => 1000, 'gestionados' => 2, 'negados' => 1, 'pendientes' => 0, 'eliminados' => 350, 'archivados' => 0, 'contestados' => 100]);
     }
 
     public function test_no_red_card_groups_insurers_without_the_contract_type(): void

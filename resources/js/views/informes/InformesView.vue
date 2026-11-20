@@ -300,6 +300,7 @@ import {
   Layers as LayersIcon,
   MailCheck as MailCheckIcon,
   MailX as MailXIcon,
+  Archive as ArchiveIcon,
   Reply as ReplyIcon,
   Trash2 as TrashIcon,
   PieChart as PieIcon,
@@ -353,7 +354,7 @@ const datosSeg = computed<InformeCompleto>(() => informeSeg.value ?? informe.val
 // Filtro propio de «Correos de la bandeja» (por defecto, hoy), independiente del informe y del seguimiento.
 const hoyIso = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
 const rangoCorreos = ref<[string, string] | null>([hoyIso, hoyIso]);
-const correosDatos = ref({ total: 0, gestionados: 0, negados: 0, pendientes: 0, eliminados: 0, contestados: 0 });
+const correosDatos = ref<{ total: number; gestionados: number; negados: number; pendientes: number; eliminados: number; archivados: number | null; contestados: number }>({ total: 0, gestionados: 0, negados: 0, pendientes: 0, eliminados: 0, archivados: 0, contestados: 0 });
 
 async function cargarCorreos(): Promise<void> {
   try {
@@ -373,6 +374,7 @@ const tarjetasCorreos = computed(() => {
     { label: 'Correos negados', valor: c.negados, clase: 'inf-ind-red', icono: MailXIcon, ayuda: 'Solicitudes negadas desde la bandeja' },
     { label: 'Pendientes en bandeja', valor: c.pendientes, clase: 'inf-ind-orange', icono: HourglassIcon, ayuda: 'Siguen en la bandeja sin gestionar; la limpieza de medianoche los pasa a eliminados' },
     { label: 'Correos eliminados', valor: c.eliminados, clase: 'inf-ind-gray', icono: TrashIcon, ayuda: 'Borrados a mano o descartados por la limpieza de medianoche' },
+    { label: 'Archivados en Gmail', valor: c.archivados ?? '—', clase: 'inf-ind-violet', icono: ArchiveIcon, ayuda: 'Llegaron al buzón y alguien los archivó en Gmail antes de que la bandeja los guardara. Se calcula desde el 20/11/2026' },
     { label: 'Correos con respuesta', valor: c.contestados, clase: 'inf-ind-teal', icono: ReplyIcon, ayuda: 'Contestados con el botón «Contestar»' },
   ];
 });
@@ -860,6 +862,7 @@ onMounted(() => { void cargarCorreos(); void cargar(); });
 .inf-ind-blue { background: #2563eb; color: #fff; }
 .inf-ind-teal { background: #0d9488; color: #fff; }
 .inf-ind-gray { background: #64748b; color: #fff; }
+.inf-ind-violet { background: #7c3aed; color: #fff; }
 .dark .inf-indicators li { border-color: #263352; background: #1a2233; }
 .dark .inf-ind-label { color: #cbd5e1; }
 .dark .inf-ind-green { background: #16a34a; color: #fff; }
@@ -869,6 +872,7 @@ onMounted(() => { void cargarCorreos(); void cargar(); });
 .dark .inf-ind-blue { background: #2563eb; color: #fff; }
 .dark .inf-ind-teal { background: #0d9488; color: #fff; }
 .dark .inf-ind-gray { background: #64748b; color: #fff; }
+.dark .inf-ind-violet { background: #7c3aed; color: #fff; }
 
 /* ── Listas de categorías (4 desgloses) ── */
 .inf-cat { display: flex; flex-direction: column; gap: 5px; margin: 0; padding: 0 2px 0 0; list-style: none; max-height: 176px; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-color: transparent transparent; }

@@ -14,6 +14,9 @@ use Throwable;
  */
 class InboxEstadistica extends Model
 {
+    /** Desde este día los contadores de eliminados existen y el reparto de correos es completo. */
+    public const CONTEO_COMPLETO_DESDE = '2026-11-20';
+
     public const CAMPOS = ['recibidos', 'eliminados', 'contestados'];
 
     protected $fillable = ['fecha', 'recibidos', 'eliminados', 'contestados'];

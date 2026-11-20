@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\InboxEstadistica;
 use App\Models\InboxMensaje;
 use App\Models\SolicitudReferencia;
+use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Carbon\CarbonPeriod;
 use Illuminate\Support\Collection;
@@ -274,7 +275,7 @@ class InformeReferenciaService
      * diarios (la limpieza borra los correos, no los números); gestionados y
      * negados se cuentan de los correos que sí se conservan.
      *
-     * @return array{total: int, gestionados: int, negados: int, pendientes: int, eliminados: int, contestados: int}
+     * @return array{total: int, gestionados: int, negados: int, pendientes: int, eliminados: int, archivados: int|null, contestados: int}
      */
     public function correos(CarbonInterface $desde, CarbonInterface $hasta): array
     {
@@ -293,8 +294,42 @@ class InformeReferenciaService
             'negados' => (clone $enPeriodo)->where('gestion', 'negada')->count(),
             'pendientes' => (clone $enPeriodo)->whereNull('gestion')->count(),
             'eliminados' => (int) $contadores?->eliminados,
+            'archivados' => $this->archivadosEnGmail($desde, $hasta),
             'contestados' => (int) $contadores?->contestados,
         ];
+    }
+
+    /**
+     * Correos que llegaron al buzón y la Bandeja nunca guardó porque alguien
+     * los sacó de Entrada en Gmail antes de sincronizarse: lo recibido menos
+     * lo que quedó en la base y lo eliminado. Solo es confiable desde que los
+     * contadores de eliminados existen; antes de esa fecha no hay forma de
+     * saberlo y se devuelve null.
+     */
+    private function archivadosEnGmail(CarbonInterface $desde, CarbonInterface $hasta): ?int
+    {
+        $inicio = $desde->copy()->startOfDay();
+        $conteoCompleto = Carbon::parse(InboxEstadistica::CONTEO_COMPLETO_DESDE)->startOfDay();
+
+        if ($inicio->lt($conteoCompleto)) {
+            $inicio = $conteoCompleto;
+        }
+
+        if ($inicio->gt($hasta->copy()->startOfDay())) {
+            return null;
+        }
+
+        $contadores = InboxEstadistica::query()
+            ->whereBetween('fecha', [$inicio->toDateString(), $hasta->toDateString()])
+            ->selectRaw('COALESCE(SUM(recibidos), 0) AS recibidos, COALESCE(SUM(eliminados), 0) AS eliminados')
+            ->first();
+
+        $guardados = InboxMensaje::query()
+            ->where('recibido_en', '>=', $inicio)
+            ->where('recibido_en', '<', $hasta->copy()->addDay()->startOfDay())
+            ->count();
+
+        return max(0, (int) $contadores?->recibidos - $guardados - (int) $contadores?->eliminados);
     }
 
     /**
