@@ -116,6 +116,72 @@ class InformeReferenciaService
     }
 
     /**
+     * Base de negados con el formato de la «BASE REFERENCIA» que se llevaba
+     * en Drive (hoja NEGADOS): una fila por solicitud negada por decisión
+     * (sin las que fueron aceptadas y luego no ingresaron), con las 27
+     * columnas de siempre y en el mismo orden.
+     *
+     * @return array<int, array<int, string|int|null>>
+     */
+    public function filasBaseReferencia(CarbonInterface $desde, CarbonInterface $hasta): array
+    {
+        $filas = [['DIA', 'MES', ' AÑO', 'Hora', 'Primer Nombre', 'Segundo Nombre', 'Primer Apellido', 'Segundo Apellido', 'Genero', 'Edad', 'Tipo  de Identificación', 'Numero ', 'EPS', 'Diagnóstico ? ', 'Nombre de la Institución de origen ', 'Municipio Cápita ', 'Gestante ', 'Condicion especial ', 'cual condicion especial ?', 'Especialidad Requerida', 'Servicio ubicacion actual', 'Servicio  al que se remite ', 'Resumen Historia Clinica', 'Hora Negado', 'Motivo de Negación', 'Observación ', 'Nombre de quien rechaza remisión']];
+
+        $mayusculas = fn (?string $texto): string => mb_strtoupper(trim((string) $texto));
+        $hora = fn (mixed $valor): ?string => $valor ? substr((string) $valor, 0, 5) : null;
+
+        SolicitudReferencia::query()
+            ->with(['clinica:id,nombre', 'diagnosticos'])
+            ->where('estado', 'negado')
+            ->where(fn ($q) => $q->whereNull('motivo_no_ingreso')->orWhere('motivo_no_ingreso', ''))
+            ->where('fecha', '>=', $desde->toDateString())
+            ->where('fecha', '<', $hasta->copy()->addDay()->toDateString())
+            ->orderBy('fecha')
+            ->orderBy('hora')
+            ->chunk(500, function ($lote) use (&$filas, $mayusculas, $hora): void {
+                foreach ($lote as $s) {
+                    $diagnostico = $s->diagnosticos->isNotEmpty()
+                        ? $s->diagnosticos->map(fn ($d): string => trim("{$d->codigo_cie10} {$d->descripcion}"))->implode('; ')
+                        : (string) $s->diagnostico;
+                    $condicion = trim((string) $s->condicion_especial);
+                    $sinCondicion = $condicion === '' || mb_strtoupper($condicion) === 'N/A';
+
+                    $filas[] = [
+                        $s->fecha?->day,
+                        $s->fecha?->month,
+                        $s->fecha?->year,
+                        $hora($s->hora),
+                        $mayusculas($s->primer_nombre),
+                        $mayusculas($s->segundo_nombre),
+                        $mayusculas($s->primer_apellido),
+                        $mayusculas($s->segundo_apellido),
+                        $s->genero,
+                        $s->edad,
+                        $s->tipo_documento,
+                        $s->numero_documento,
+                        $s->eps,
+                        $diagnostico,
+                        $s->clinica?->nombre ?? $s->institucion_remitente,
+                        $mayusculas($s->municipio_capita),
+                        $s->gestante ? 'SI' : 'NO',
+                        $sinCondicion ? 'NO' : 'SI',
+                        $sinCondicion ? 'N/A' : $mayusculas($condicion),
+                        $mayusculas($s->especialidad_requerida),
+                        $mayusculas($s->servicio_ubicacion_actual),
+                        $mayusculas($s->servicio_remision),
+                        $s->resumen_historia_clinica,
+                        $hora($s->hora_respuesta),
+                        $mayusculas($s->motivo_negacion),
+                        $s->observaciones_respuesta,
+                        $mayusculas($s->nombre_quien_responde),
+                    ];
+                }
+            });
+
+        return $filas;
+    }
+
+    /**
      * Hojas del libro de Excel (nombre de hoja => filas; la primera fila es el encabezado).
      *
      * @param  array<string, mixed>  $informe

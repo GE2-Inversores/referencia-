@@ -60,6 +60,24 @@ class InformeController extends Controller
     }
 
     /**
+     * Excel con la base de negados en el formato de la hoja NEGADOS del Drive.
+     */
+    public function exportarBase(Request $request): BinaryFileResponse
+    {
+        [$desde, $hasta] = $this->periodo($request);
+
+        $ruta = tempnam(sys_get_temp_dir(), 'base');
+
+        XlsxWriter::guardar($ruta, ['NEGADOS' => $this->informes->filasBaseReferencia($desde, $hasta)]);
+
+        return response()
+            ->download($ruta, "BASE REFERENCIA_{$desde->toDateString()}_{$hasta->toDateString()}.xlsx", [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            ])
+            ->deleteFileAfterSend();
+    }
+
+    /**
      * Período del informe; por defecto el mes en curso.
      *
      * @return array{0: CarbonImmutable, 1: CarbonImmutable}

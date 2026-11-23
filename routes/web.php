@@ -67,6 +67,7 @@ Route::prefix('api')->name('api.')->group(function (): void {
         Route::get('informes', [InformeController::class, 'index'])->name('informes.index')->middleware('permission:dashboard.view');
         Route::get('informes/correos', [InformeController::class, 'correos'])->name('informes.correos')->middleware('permission:dashboard.view');
         Route::get('informes/exportar', [InformeController::class, 'exportar'])->name('informes.exportar')->middleware('permission:dashboard.view');
+        Route::get('informes/exportar-base', [InformeController::class, 'exportarBase'])->name('informes.exportar-base')->middleware('permission:dashboard.view');
 
         Route::get('inbox', [InboxController::class, 'index'])->name('inbox.index')->middleware('permission:inbox.view');
         Route::get('inbox/no-leidos', [InboxController::class, 'noLeidos'])->name('inbox.no-leidos')->middleware('permission:inbox.view');

@@ -378,6 +378,31 @@ class InformeReferenciasTest extends TestCase
         $zip->close();
     }
 
+    public function test_negados_base_export_uses_the_drive_layout_and_only_decision_denials(): void
+    {
+        $this->datosDePrueba();
+
+        $respuesta = $this->actingAs($this->staff())
+            ->get('/api/informes/exportar-base?desde=2026-11-01&hasta=2026-11-30')
+            ->assertOk();
+
+        $this->assertStringContainsString('BASE REFERENCIA', $respuesta->headers->get('content-disposition'));
+
+        $zip = new ZipArchive;
+        $this->assertTrue($zip->open($respuesta->baseResponse->getFile()->getPathname()));
+
+        $this->assertStringContainsString('name="NEGADOS"', (string) $zip->getFromName('xl/workbook.xml'));
+
+        $hoja = (string) $zip->getFromName('xl/worksheets/sheet1.xml');
+        foreach (['DIA', 'Hora Negado', 'Motivo de Negación', 'Nombre de quien rechaza remisión'] as $columna) {
+            $this->assertStringContainsString($columna, $hoja);
+        }
+
+        // Encabezado + las 3 negadas por decisión (la que no ingresó no es una negación).
+        $this->assertSame(4, substr_count($hoja, '<row '));
+        $zip->close();
+    }
+
     public function test_xlsx_writer_produces_well_formed_xml_and_escapes_text(): void
     {
         $ruta = tempnam(sys_get_temp_dir(), 'xlsx');

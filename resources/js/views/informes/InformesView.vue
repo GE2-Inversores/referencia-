@@ -102,6 +102,9 @@
             <button type="button" class="inf-btn inf-btn-icon" :disabled="cargando" title="Actualizar" @click="cargar">
               <component :is="RefreshIcon" class="w-4 h-4" :class="{ 'animate-spin': cargando }" />
             </button>
+            <button type="button" class="inf-btn inf-btn-icon" :disabled="descargandoBase" title="Descargar base de negados (formato Drive)" @click="descargarBase">
+              <component :is="SheetIcon" class="w-4 h-4" />
+            </button>
           </header>
           <div class="inf-estados">
             <div v-if="informe.resumen.total > 0" class="inf-donut">
@@ -301,6 +304,7 @@ import {
   MailCheck as MailCheckIcon,
   MailX as MailXIcon,
   Archive as ArchiveIcon,
+  FileSpreadsheet as SheetIcon,
   Reply as ReplyIcon,
   Trash2 as TrashIcon,
   PieChart as PieIcon,
@@ -382,6 +386,26 @@ const cargando = ref(false);
 const error = ref('');
 
 const parametros = (r: [string, string] | null = rango.value) => (r ? { desde: r[0], hasta: r[1] } : {});
+
+const descargandoBase = ref(false);
+
+// Base de negados con el formato de la hoja NEGADOS del Drive, para el período del informe.
+async function descargarBase(): Promise<void> {
+  descargandoBase.value = true;
+  try {
+    const { data } = await http.get('/api/informes/exportar-base', { params: parametros(rango.value), responseType: 'blob' });
+    const url = URL.createObjectURL(data as Blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `BASE REFERENCIA_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch {
+    notify.error('No se pudo generar la base de negados.');
+  } finally {
+    descargandoBase.value = false;
+  }
+}
 
 async function cargarSeg(): Promise<void> {
   cargandoSeg.value = true;

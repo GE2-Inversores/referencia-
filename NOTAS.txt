@@ -88,4 +88,8 @@ cacsb@srv-1:~/sites/referencia$ /opt/cpanel/ea-php83/root/usr/bin/php artisan mi
 
 
 NOTAS
-1. 
+1. informe de negados de aseguradores 
+2.  informe de que negamos por asegurador, especialidad, servicio, de todo el historial, 
+3. adjuntar archisvos a las respuestas
+4. ver los archisvos adjuntos en el correo de la vista previa 
+5. 
