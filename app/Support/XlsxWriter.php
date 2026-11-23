@@ -107,7 +107,7 @@ class XlsxWriter
      */
     private static function estilosDePresentacion(): string
     {
-        $centrado = '<alignment horizontal="center" vertical="center"/>';
+        $centrado = '<alignment horizontal="center" vertical="center" wrapText="1"/>';
 
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
             .'<fonts count="2"><font><sz val="12"/><color rgb="FF1E293B"/><name val="Calibri"/></font><font><b/><sz val="13"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts>'

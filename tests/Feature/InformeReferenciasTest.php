@@ -394,13 +394,28 @@ class InformeReferenciasTest extends TestCase
         $this->assertStringContainsString('name="NEGADOS"', (string) $zip->getFromName('xl/workbook.xml'));
 
         $hoja = (string) $zip->getFromName('xl/worksheets/sheet1.xml');
-        foreach (['DIA', 'Hora Negado', 'Motivo de Negación', 'Nombre de quien rechaza remisión'] as $columna) {
+        foreach (['DIA', 'Municipio que capita', 'Hora de negado', 'Motivación de negación', 'Nombre de quien rechaza la remisión'] as $columna) {
             $this->assertStringContainsString($columna, $hoja);
         }
 
         // Encabezado + las 4 negadas (3 por decisión y 1 que no ingresó), sin importar el período pedido.
         $this->assertSame(5, substr_count($hoja, '<row '));
         $zip->close();
+    }
+
+    public function test_negados_base_export_falls_back_to_the_current_service_when_there_is_no_destination(): void
+    {
+        $this->solicitud('negado', '2026-11-05', ['servicio_ubicacion_actual' => 'UCIN', 'servicio_remision' => null, 'motivo_negacion' => 'No cupo']);
+
+        $respuesta = $this->actingAs($this->staff())->get('/api/informes/exportar-base')->assertOk();
+
+        $zip = new ZipArchive;
+        $this->assertTrue($zip->open($respuesta->baseResponse->getFile()->getPathname()));
+        $hoja = (string) $zip->getFromName('xl/worksheets/sheet1.xml');
+        $zip->close();
+
+        // Una vez en «Servicio ubicacion actual» y otra en «Servicio al que se remite».
+        $this->assertSame(2, substr_count($hoja, '>UCIN<'));
     }
 
     public function test_xlsx_writer_presentation_mode_is_well_formed_and_styled(): void
