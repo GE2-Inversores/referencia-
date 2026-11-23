@@ -115,6 +115,8 @@ class InformeReferenciaService
         return $informe;
     }
 
+    private const ENCABEZADO_PACIENTE = ['Fecha', 'Hora', 'Nombres y apellidos', 'Género', 'Edad', 'Tipo de documento', 'Número de documento', 'EPS', 'Municipio que capita', 'Especialidad requerida', 'Servicio ubicación actual', 'Servicio al que se remite'];
+
     /**
      * Base de negados para descargar en Excel: una fila por cada solicitud
      * negada de todo el historial, con las columnas que usa el equipo en su
@@ -125,40 +127,89 @@ class InformeReferenciaService
      */
     public function filasBaseReferencia(): array
     {
-        $filas = [['Fecha', 'Hora', 'Nombres y apellidos', 'Género', 'Edad', 'Tipo de documento', 'Número de documento', 'EPS', 'Municipio que capita', 'Especialidad requerida', 'Servicio ubicación actual', 'Servicio al que se remite', 'Hora de negado', 'Motivación de negación', 'Observación', 'Nombre de quien rechaza la remisión']];
-
-        $mayusculas = fn (?string $texto): string => mb_strtoupper(trim((string) $texto));
-        $nombreCompleto = fn (SolicitudReferencia $s): string => mb_strtoupper(trim(preg_replace('/\s+/', ' ', "{$s->primer_nombre} {$s->segundo_nombre} {$s->primer_apellido} {$s->segundo_apellido}")));
-        $hora = fn (mixed $valor): ?string => $valor ? substr((string) $valor, 0, 5) : null;
+        $filas = [[...self::ENCABEZADO_PACIENTE, 'Hora de negado', 'Motivación de negación', 'Observación', 'Nombre de quien rechaza la remisión']];
 
         SolicitudReferencia::query()
             ->where('estado', 'negado')
             ->orderBy('fecha')
             ->orderBy('hora')
-            ->chunk(500, function ($lote) use (&$filas, $mayusculas, $nombreCompleto, $hora): void {
+            ->chunk(500, function ($lote) use (&$filas): void {
                 foreach ($lote as $s) {
                     $filas[] = [
-                        $s->fecha?->format('d/m/Y'),
-                        $hora($s->hora),
-                        $nombreCompleto($s),
-                        $s->genero,
-                        $s->edad,
-                        $s->tipo_documento,
-                        $s->numero_documento,
-                        $s->eps,
-                        $mayusculas($s->municipio_capita),
-                        $mayusculas($s->especialidad_requerida),
-                        $mayusculas($s->servicio_ubicacion_actual),
-                        $mayusculas($s->servicio_remision ?: $s->servicio_ubicacion_actual),
-                        $hora($s->hora_respuesta),
-                        $mayusculas($s->motivo_negacion ?: $s->motivo_no_ingreso),
+                        ...$this->columnasPaciente($s),
+                        $this->horaCorta($s->hora_respuesta),
+                        $this->enMayusculas($s->motivo_negacion ?: $s->motivo_no_ingreso),
                         $s->observaciones_respuesta,
-                        $mayusculas($s->nombre_quien_responde),
+                        $this->enMayusculas($s->nombre_quien_responde),
                     ];
                 }
             });
 
         return $filas;
+    }
+
+    /**
+     * Base de aceptados para descargar en Excel, con las mismas columnas y
+     * el mismo orden que la de negados: en lugar de la negación llevan la
+     * aceptación (hora, servicio de llegada, observación y quién aceptó).
+     * Incluye las que ya ingresaron y las que aún no llegan.
+     *
+     * @return array<int, array<int, string|int|null>>
+     */
+    public function filasBaseAceptados(): array
+    {
+        $filas = [[...self::ENCABEZADO_PACIENTE, 'Hora de aceptación', 'Servicio de llegada', 'Observación', 'Nombre de quien acepta la remisión']];
+
+        SolicitudReferencia::query()
+            ->whereIn('estado', ['en_espera', 'completado'])
+            ->orderBy('fecha')
+            ->orderBy('hora')
+            ->chunk(500, function ($lote) use (&$filas): void {
+                foreach ($lote as $s) {
+                    $filas[] = [
+                        ...$this->columnasPaciente($s),
+                        $this->horaCorta($s->hora_respuesta),
+                        $this->enMayusculas($s->lugar_llegada),
+                        $s->observaciones_respuesta,
+                        $this->enMayusculas($s->nombre_quien_responde),
+                    ];
+                }
+            });
+
+        return $filas;
+    }
+
+    /**
+     * Las 12 primeras columnas de las bases en Excel, iguales para negados y aceptados.
+     *
+     * @return array<int, string|int|null>
+     */
+    private function columnasPaciente(SolicitudReferencia $s): array
+    {
+        return [
+            $s->fecha?->format('d/m/Y'),
+            $this->horaCorta($s->hora),
+            $this->enMayusculas(preg_replace('/\s+/', ' ', "{$s->primer_nombre} {$s->segundo_nombre} {$s->primer_apellido} {$s->segundo_apellido}")),
+            $s->genero,
+            $s->edad,
+            $s->tipo_documento,
+            $s->numero_documento,
+            $s->eps,
+            $this->enMayusculas($s->municipio_capita),
+            $this->enMayusculas($s->especialidad_requerida),
+            $this->enMayusculas($s->servicio_ubicacion_actual),
+            $this->enMayusculas($s->servicio_remision ?: $s->servicio_ubicacion_actual),
+        ];
+    }
+
+    private function enMayusculas(?string $texto): string
+    {
+        return mb_strtoupper(trim((string) $texto));
+    }
+
+    private function horaCorta(mixed $valor): ?string
+    {
+        return $valor ? substr((string) $valor, 0, 5) : null;
     }
 
     /**

@@ -418,6 +418,44 @@ class InformeReferenciasTest extends TestCase
         $this->assertSame(2, substr_count($hoja, '>UCIN<'));
     }
 
+    public function test_base_export_is_one_workbook_with_a_denied_tab_and_an_accepted_tab(): void
+    {
+        $this->solicitud('en_espera', '2026-11-05', ['lugar_llegada' => 'UCI', 'hora_respuesta' => '08:15:00', 'nombre_quien_responde' => 'Brenda Avila', 'primer_nombre' => 'Aceptada']);
+        $this->solicitud('completado', '2026-11-06', ['lugar_llegada' => 'Urgencias', 'primer_nombre' => 'Ingreso']);
+        $this->solicitud('negado', '2026-11-07', ['primer_nombre' => 'Negada']);
+        $this->solicitud('pendiente_cama', '2026-11-08', ['primer_nombre' => 'Pendiente']);
+
+        $respuesta = $this->actingAs($this->staff())->get('/api/informes/exportar-base')->assertOk();
+
+        $zip = new ZipArchive;
+        $this->assertTrue($zip->open($respuesta->baseResponse->getFile()->getPathname()));
+        $libro = (string) $zip->getFromName('xl/workbook.xml');
+        $negados = (string) $zip->getFromName('xl/worksheets/sheet1.xml');
+        $aceptados = (string) $zip->getFromName('xl/worksheets/sheet2.xml');
+        $zip->close();
+
+        $this->assertStringContainsString('name="NEGADOS"', $libro);
+        $this->assertStringContainsString('name="ACEPTADOS"', $libro);
+
+        // Cada pestaña lleva 16 columnas en el mismo orden, y solo lo suyo.
+        foreach ([$negados, $aceptados] as $hoja) {
+            preg_match('/<row r="1".*?<\/row>/s', $hoja, $encabezado);
+            $this->assertSame(16, substr_count($encabezado[0], '<c '));
+        }
+
+        $this->assertStringContainsString('Hora de negado', $negados);
+        $this->assertStringContainsString('NEGADA PRUEBA', $negados);
+        $this->assertStringNotContainsString('ACEPTADA PRUEBA', $negados);
+        $this->assertSame(2, substr_count($negados, '<row '));
+
+        foreach (['Hora de aceptación', 'Servicio de llegada', 'Nombre de quien acepta la remisión', 'ACEPTADA PRUEBA', 'INGRESO PRUEBA', 'BRENDA AVILA'] as $esperado) {
+            $this->assertStringContainsString($esperado, $aceptados);
+        }
+        $this->assertStringNotContainsString('NEGADA PRUEBA', $aceptados);
+        $this->assertStringNotContainsString('PENDIENTE PRUEBA', $aceptados);
+        $this->assertSame(3, substr_count($aceptados, '<row '));
+    }
+
     public function test_xlsx_writer_presentation_mode_is_well_formed_and_styled(): void
     {
         $ruta = tempnam(sys_get_temp_dir(), 'xlsx');

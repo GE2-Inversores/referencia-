@@ -102,7 +102,7 @@
             <button type="button" class="inf-btn inf-btn-icon" :disabled="cargando" title="Actualizar" @click="cargar">
               <component :is="RefreshIcon" class="w-4 h-4" :class="{ 'animate-spin': cargando }" />
             </button>
-            <button type="button" class="inf-btn inf-btn-icon" :disabled="descargandoBase" title="Descargar todas las negadas del historial (formato Drive)" @click="descargarBase">
+            <button type="button" class="inf-btn inf-btn-icon" :disabled="descargandoBase" title="Descargar base de negados y aceptados del historial (Excel con dos pestañas)" @click="descargarBase">
               <component :is="SheetIcon" class="w-4 h-4" />
             </button>
           </header>
@@ -389,7 +389,7 @@ const parametros = (r: [string, string] | null = rango.value) => (r ? { desde: r
 
 const descargandoBase = ref(false);
 
-// Todas las negadas del historial con el formato de la hoja NEGADOS del Drive (no depende del filtro).
+// Todas las negadas y aceptadas del historial en un solo Excel, una pestaña cada una (no depende del filtro).
 async function descargarBase(): Promise<void> {
   descargandoBase.value = true;
   try {
@@ -401,7 +401,7 @@ async function descargarBase(): Promise<void> {
     a.click();
     URL.revokeObjectURL(url);
   } catch {
-    notify.error('No se pudo generar la base de negados.');
+    notify.error('No se pudo generar la base de referencia.');
   } finally {
     descargandoBase.value = false;
   }
