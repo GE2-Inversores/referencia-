@@ -73,7 +73,7 @@ class XlsxWriter
                 $estilo = $r === 0 ? ' s="1"' : ($presentacion ? ($r % 2 === 0 ? ' s="3"' : ' s="2"') : '');
                 $largo = is_string($valor) ? mb_strlen($valor) : strlen((string) $valor);
                 $anchos[$c] = $presentacion
-                    ? max($anchos[$c] ?? 10, min(48, (int) round($largo * 1.2) + ($r === 0 ? 6 : 4)))
+                    ? max($anchos[$c] ?? 10, min(55, (int) round($largo * 1.2) + ($r === 0 ? 6 : 4)))
                     : max($anchos[$c] ?? 8, min(60, $largo + 2));
 
                 if ($valor === null || $valor === '') {
@@ -85,7 +85,8 @@ class XlsxWriter
                 }
             }
 
-            $altura = $presentacion ? ($r === 0 ? ' ht="34" customHeight="1"' : ' ht="21" customHeight="1"') : '';
+            // Las filas de datos se ajustan solas al texto: con altura fija, el texto largo quedaba cortado.
+            $altura = $presentacion && $r === 0 ? ' ht="34" customHeight="1"' : '';
             $datos .= '<row r="'.($r + 1).'"'.$altura.'>'.$celdas.'</row>';
         }
 
