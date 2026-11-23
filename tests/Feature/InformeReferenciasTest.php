@@ -378,12 +378,12 @@ class InformeReferenciasTest extends TestCase
         $zip->close();
     }
 
-    public function test_negados_base_export_uses_the_drive_layout_and_only_decision_denials(): void
+    public function test_negados_base_export_uses_the_drive_layout_with_every_denial(): void
     {
         $this->datosDePrueba();
 
         $respuesta = $this->actingAs($this->staff())
-            ->get('/api/informes/exportar-base?desde=2026-11-01&hasta=2026-11-30')
+            ->get('/api/informes/exportar-base?desde=2026-11-01&hasta=2026-11-02')
             ->assertOk();
 
         $this->assertStringContainsString('BASE REFERENCIA', $respuesta->headers->get('content-disposition'));
@@ -398,9 +398,35 @@ class InformeReferenciasTest extends TestCase
             $this->assertStringContainsString($columna, $hoja);
         }
 
-        // Encabezado + las 3 negadas por decisión (la que no ingresó no es una negación).
-        $this->assertSame(4, substr_count($hoja, '<row '));
+        // Encabezado + las 4 negadas (3 por decisión y 1 que no ingresó), sin importar el período pedido.
+        $this->assertSame(5, substr_count($hoja, '<row '));
         $zip->close();
+    }
+
+    public function test_xlsx_writer_presentation_mode_is_well_formed_and_styled(): void
+    {
+        $ruta = tempnam(sys_get_temp_dir(), 'xlsx');
+        XlsxWriter::guardar($ruta, ['NEGADOS' => [['DIA', 'Paciente'], [1, 'ANA'], [2, null], [3, 'LUIS']]], presentacion: true);
+
+        $zip = new ZipArchive;
+        $this->assertTrue($zip->open($ruta));
+
+        foreach (['xl/styles.xml', 'xl/worksheets/sheet1.xml', 'xl/workbook.xml'] as $parte) {
+            $this->assertNotFalse(simplexml_load_string((string) $zip->getFromName($parte)), "XML mal formado: {$parte}");
+        }
+
+        $estilos = (string) $zip->getFromName('xl/styles.xml');
+        $this->assertStringContainsString('horizontal="center"', $estilos);
+        $this->assertStringContainsString('<sz val="12"/>', $estilos);
+
+        $hoja = (string) $zip->getFromName('xl/worksheets/sheet1.xml');
+        $this->assertStringContainsString('<autoFilter ref="A1:B4"/>', $hoja);
+        $this->assertStringContainsString('state="frozen"', $hoja);
+        // Las celdas vacías también llevan estilo para conservar el borde.
+        $this->assertStringContainsString('<c r="B3" s="3"/>', $hoja);
+
+        $zip->close();
+        unlink($ruta);
     }
 
     public function test_xlsx_writer_produces_well_formed_xml_and_escapes_text(): void

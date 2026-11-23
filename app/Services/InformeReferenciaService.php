@@ -117,13 +117,14 @@ class InformeReferenciaService
 
     /**
      * Base de negados con el formato de la «BASE REFERENCIA» que se llevaba
-     * en Drive (hoja NEGADOS): una fila por solicitud negada por decisión
-     * (sin las que fueron aceptadas y luego no ingresaron), con las 27
-     * columnas de siempre y en el mismo orden.
+     * en Drive (hoja NEGADOS): una fila por cada solicitud negada de todo el
+     * historial, con las 27 columnas de siempre y en el mismo orden. En las
+     * que se aceptaron y luego no ingresaron, el motivo de no ingreso ocupa
+     * la columna del motivo.
      *
      * @return array<int, array<int, string|int|null>>
      */
-    public function filasBaseReferencia(CarbonInterface $desde, CarbonInterface $hasta): array
+    public function filasBaseReferencia(): array
     {
         $filas = [['DIA', 'MES', ' AÑO', 'Hora', 'Primer Nombre', 'Segundo Nombre', 'Primer Apellido', 'Segundo Apellido', 'Genero', 'Edad', 'Tipo  de Identificación', 'Numero ', 'EPS', 'Diagnóstico ? ', 'Nombre de la Institución de origen ', 'Municipio Cápita ', 'Gestante ', 'Condicion especial ', 'cual condicion especial ?', 'Especialidad Requerida', 'Servicio ubicacion actual', 'Servicio  al que se remite ', 'Resumen Historia Clinica', 'Hora Negado', 'Motivo de Negación', 'Observación ', 'Nombre de quien rechaza remisión']];
 
@@ -133,9 +134,6 @@ class InformeReferenciaService
         SolicitudReferencia::query()
             ->with(['clinica:id,nombre', 'diagnosticos'])
             ->where('estado', 'negado')
-            ->where(fn ($q) => $q->whereNull('motivo_no_ingreso')->orWhere('motivo_no_ingreso', ''))
-            ->where('fecha', '>=', $desde->toDateString())
-            ->where('fecha', '<', $hasta->copy()->addDay()->toDateString())
             ->orderBy('fecha')
             ->orderBy('hora')
             ->chunk(500, function ($lote) use (&$filas, $mayusculas, $hora): void {
@@ -171,7 +169,7 @@ class InformeReferenciaService
                         $mayusculas($s->servicio_remision),
                         $s->resumen_historia_clinica,
                         $hora($s->hora_respuesta),
-                        $mayusculas($s->motivo_negacion),
+                        $mayusculas($s->motivo_negacion ?: $s->motivo_no_ingreso),
                         $s->observaciones_respuesta,
                         $mayusculas($s->nombre_quien_responde),
                     ];

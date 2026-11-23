@@ -60,18 +60,19 @@ class InformeController extends Controller
     }
 
     /**
-     * Excel con la base de negados en el formato de la hoja NEGADOS del Drive.
+     * Excel con todas las negadas del historial en el formato de la hoja
+     * NEGADOS del Drive; no depende del período del informe.
      */
     public function exportarBase(Request $request): BinaryFileResponse
     {
-        [$desde, $hasta] = $this->periodo($request);
+        abort_unless($request->user()->hasPermission('dashboard.view'), Response::HTTP_FORBIDDEN);
 
         $ruta = tempnam(sys_get_temp_dir(), 'base');
 
-        XlsxWriter::guardar($ruta, ['NEGADOS' => $this->informes->filasBaseReferencia($desde, $hasta)]);
+        XlsxWriter::guardar($ruta, ['NEGADOS' => $this->informes->filasBaseReferencia()], presentacion: true);
 
         return response()
-            ->download($ruta, "BASE REFERENCIA_{$desde->toDateString()}_{$hasta->toDateString()}.xlsx", [
+            ->download($ruta, 'BASE REFERENCIA_'.now()->toDateString().'.xlsx', [
                 'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             ])
             ->deleteFileAfterSend();
