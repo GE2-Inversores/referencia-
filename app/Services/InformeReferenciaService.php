@@ -8,6 +8,7 @@ use App\Models\SolicitudReferencia;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Carbon\CarbonPeriod;
+use DateTimeInterface;
 use Illuminate\Support\Collection;
 
 /**
@@ -136,10 +137,13 @@ class InformeReferenciaService
             ->orderBy('hora')
             ->chunk(500, function ($lote) use (&$filas): void {
                 foreach ($lote as $s) {
+                    // Fecha y hora reales del negado (el evento o la última modificación).
+                    $negacion = $this->marcaEvento($s, ['negado']) ?? $s->updated_at;
+
                     $filas[] = [
                         ...$this->columnasPaciente($s),
-                        $this->fechaEvento($s, ['negado']),
-                        $this->horaAmPm($s->hora_respuesta),
+                        $negacion?->format('d/m/Y'),
+                        $this->horaAmPm($negacion),
                         $this->enMayusculas($s->motivo_negacion ?: $s->motivo_no_ingreso),
                         $s->observaciones_respuesta,
                         $this->enMayusculas($s->nombre_quien_responde),
@@ -167,9 +171,9 @@ class InformeReferenciaService
             'Número de documento', 'EPS', 'Diagnóstico', 'Institución de origen',
             'Municipio que capita', 'Especialidad requerida', 'Servicio ubicación actual',
             'Servicio al que se remite', 'Resumen de historia clínica', 'Observación',
-            'Fecha de aceptado', 'Hora de aceptado', 'Hora de llegada', 'Estado', 'Motivo no ingreso',
-            'Otras observaciones', 'Código aceptación', 'N° ingreso',
-            'Nombre de quien acepta la remisión',
+            'Hora de aceptado', 'Fecha de llegada', 'Hora de llegada',
+            'Estado', 'Motivo no ingreso', 'Otras observaciones', 'Código aceptación',
+            'N° ingreso', 'Nombre de quien acepta la remisión',
         ]];
 
         SolicitudReferencia::query()
@@ -180,6 +184,13 @@ class InformeReferenciaService
             ->orderBy('hora')
             ->chunk(500, function ($lote) use (&$filas): void {
                 foreach ($lote as $s) {
+                    // La llegada real es el momento en que confirmaron el
+                    // ingreso (evento «completado»), no la hora estimada que
+                    // se digita al aceptar. En espera y no ingresados: vacío.
+                    $llegada = $s->estado === 'completado'
+                        ? ($s->eventos->firstWhere('tipo', 'completado') ?? $s->eventos->firstWhere('tipo', 'cambio_estado'))
+                        : null;
+
                     $filas[] = [
                         $s->fecha?->format('d/m/Y'),
                         $this->horaAmPm($s->hora),
@@ -197,9 +208,11 @@ class InformeReferenciaService
                         $this->enMayusculas($s->servicio_remision ?: $s->servicio_ubicacion_actual),
                         $s->resumen_historia_clinica,
                         $s->observaciones_respuesta,
-                        $this->fechaEvento($s, ['en_espera', 'pendiente_cama']),
-                        $this->horaAmPm($s->hora_respuesta),
-                        $this->horaAmPm($s->hora_llegada),
+                        // El momento real del clic en «Confirmar aceptación»;
+                        // si el registro no tiene evento, la hora digitada.
+                        $this->horaAmPm($this->marcaEvento($s, ['en_espera', 'pendiente_cama']) ?? $s->hora_respuesta),
+                        $llegada?->created_at?->format('d/m/Y'),
+                        $llegada ? $this->horaAmPm($llegada->created_at) : null,
                         $s->estado === 'completado' ? 'SI' : 'NO',
                         $s->motivo_no_ingreso,
                         $s->observaciones,
@@ -266,10 +279,14 @@ class InformeReferenciaService
 
     /**
      * Hora en formato de 12 horas con AM/PM, como las usa el equipo
-     * («3:10 PM», «12:30 AM»).
+     * («3:10 PM», «12:30 AM»). Acepta «HH:MM[:SS]» o una fecha-hora.
      */
     private function horaAmPm(mixed $valor): ?string
     {
+        if ($valor instanceof DateTimeInterface) {
+            return $valor->format('g:i A');
+        }
+
         $hora = $this->horaCorta($valor);
 
         if ($hora === null) {
@@ -282,18 +299,18 @@ class InformeReferenciaService
     }
 
     /**
-     * Fecha en que se tomó la decisión (d/m/Y): el evento que la registró —
-     * por ejemplo «en_espera» al aceptar o «negado» al cerrar — o, para los
-     * registros sin línea de tiempo, la última modificación de la solicitud.
+     * Momento en que se tomó la decisión: el evento que la registró en la
+     * línea de tiempo — por ejemplo «en_espera» al aceptar o «negado» al
+     * cerrar — o el último cambio de estado manual.
      *
      * @param  array<int, string>  $tipos
      */
-    private function fechaEvento(SolicitudReferencia $s, array $tipos): ?string
+    private function marcaEvento(SolicitudReferencia $s, array $tipos): ?CarbonInterface
     {
         $evento = $s->eventos->first(fn ($e): bool => in_array($e->tipo, $tipos, true))
             ?? $s->eventos->firstWhere('tipo', 'cambio_estado');
 
-        return ($evento?->created_at ?? $s->updated_at)?->format('d/m/Y');
+        return $evento?->created_at;
     }
 
     /**

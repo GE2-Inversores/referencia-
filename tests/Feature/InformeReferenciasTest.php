@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\InboxEstadistica;
 use App\Models\InboxMensaje;
 use App\Models\SolicitudReferencia;
+use App\Models\SolicitudReferenciaEvento;
 use App\Models\User;
 use App\Support\XlsxWriter;
 use Database\Seeders\DatabaseSeeder;
@@ -420,11 +421,18 @@ class InformeReferenciasTest extends TestCase
 
     public function test_base_export_is_one_workbook_with_a_denied_tab_and_an_accepted_tab(): void
     {
-        $this->solicitud('en_espera', '2026-11-05', ['lugar_llegada' => 'UCI', 'hora_respuesta' => '08:15:00', 'nombre_quien_responde' => 'Brenda Avila', 'primer_nombre' => 'Aceptada', 'codigo_aceptacion' => 'REF1']);
-        $this->solicitud('completado', '2026-11-06', ['lugar_llegada' => 'Urgencias', 'primer_nombre' => 'Ingreso', 'numero_ingreso' => 361863]);
+        $aceptada = $this->solicitud('en_espera', '2026-11-05', ['lugar_llegada' => 'UCI', 'hora_respuesta' => '08:15:00', 'nombre_quien_responde' => 'Brenda Avila', 'primer_nombre' => 'Aceptada', 'codigo_aceptacion' => 'REF1']);
+        $ingreso = $this->solicitud('completado', '2026-11-06', ['lugar_llegada' => 'Urgencias', 'primer_nombre' => 'Ingreso', 'numero_ingreso' => 361863]);
         $this->solicitud('negado', '2026-11-07', ['primer_nombre' => 'Negada', 'motivo_negacion' => 'No cupo']);
         $this->solicitud('negado', '2026-11-07', ['primer_nombre' => 'NoLlego', 'motivo_no_ingreso' => 'Alta Voluntaria']);
         $this->solicitud('pendiente_cama', '2026-11-08', ['primer_nombre' => 'Pendiente']);
+
+        // La aceptación y la llegada salen de la línea de tiempo: cuando le
+        // dieron «Confirmar aceptación» y cuando confirmaron el ingreso.
+        foreach ([[$aceptada, 'en_espera', '2026-11-10 10:45:00'], [$ingreso, 'completado', '2026-11-11 14:30:00']] as [$solicitud, $tipo, $marca]) {
+            $evento = SolicitudReferenciaEvento::create(['solicitud_referencia_id' => $solicitud->id, 'tipo' => $tipo, 'titulo' => 't', 'descripcion' => 'd']);
+            $evento->forceFill(['created_at' => $marca])->save();
+        }
 
         $respuesta = $this->actingAs($this->staff())->get('/api/informes/exportar-base')->assertOk();
 
@@ -438,7 +446,7 @@ class InformeReferenciasTest extends TestCase
         $this->assertStringContainsString('name="NEGADOS"', $libro);
         $this->assertStringContainsString('name="ACEPTADOS"', $libro);
 
-        // NEGADOS lleva 17 columnas y ACEPTADOS las 25 del Drive (con el día de la decisión).
+        // NEGADOS lleva 17 columnas y ACEPTADOS las 25 del Drive (con el día y la hora reales de llegada).
         preg_match('/<row r="1".*?<\/row>/s', $negados, $encabezadoNegados);
         preg_match('/<row r="1".*?<\/row>/s', $aceptados, $encabezadoAceptados);
         $this->assertSame(17, substr_count($encabezadoNegados[0], '<c '));
@@ -450,9 +458,14 @@ class InformeReferenciasTest extends TestCase
         // Las dos negadas salen aquí: la de decisión y la que no llegó.
         $this->assertSame(3, substr_count($negados, '<row '));
 
-        foreach (['Diagnóstico', 'Institución de origen', 'Resumen de historia clínica', 'Fecha de aceptado', 'Hora de aceptado', 'Hora de llegada', 'Estado', 'Motivo no ingreso', 'Otras observaciones', 'Código aceptación', 'N° ingreso', 'Nombre de quien acepta la remisión', 'ACEPTADA PRUEBA', 'INGRESO PRUEBA', 'NOLLEGO PRUEBA', 'BRENDA AVILA', 'REF1', 'Alta Voluntaria', '8:15 AM', '9:00 AM'] as $esperado) {
+        foreach (['Diagnóstico', 'Institución de origen', 'Resumen de historia clínica', 'Hora de aceptado', 'Fecha de llegada', 'Hora de llegada', 'Estado', 'Motivo no ingreso', 'Otras observaciones', 'Código aceptación', 'N° ingreso', 'Nombre de quien acepta la remisión', 'ACEPTADA PRUEBA', 'INGRESO PRUEBA', 'NOLLEGO PRUEBA', 'BRENDA AVILA', 'REF1', 'Alta Voluntaria', '10:45 AM', '9:00 AM'] as $esperado) {
             $this->assertStringContainsString($esperado, $aceptados);
         }
+        $this->assertStringNotContainsString('Fecha de aceptado', $aceptados);
+
+        // La llegada real fue el 11/11 a las 2:30 PM (evento de la línea de tiempo).
+        $this->assertStringContainsString('11/11/2026', $aceptados);
+        $this->assertStringContainsString('2:30 PM', $aceptados);
         // La que ingresó marca SI; la que está en espera y la que no llegó, NO.
         $this->assertStringContainsString('>SI<', $aceptados);
         $this->assertSame(2, substr_count($aceptados, '>NO<'));
