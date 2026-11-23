@@ -125,25 +125,22 @@ class InformeReferenciaService
      */
     public function filasBaseReferencia(): array
     {
-        $filas = [['DIA', 'MES', 'AÑO', 'Hora', 'Nombres', 'Apellidos', 'Género', 'Edad', 'Tipo de documento', 'Número de documento', 'EPS', 'Municipio que capita', 'Especialidad requerida', 'Servicio ubicación actual', 'Servicio al que se remite', 'Hora de negado', 'Motivación de negación', 'Observación', 'Nombre de quien rechaza la remisión']];
+        $filas = [['Fecha', 'Hora', 'Nombres y apellidos', 'Género', 'Edad', 'Tipo de documento', 'Número de documento', 'EPS', 'Municipio que capita', 'Especialidad requerida', 'Servicio ubicación actual', 'Servicio al que se remite', 'Hora de negado', 'Motivación de negación', 'Observación', 'Nombre de quien rechaza la remisión']];
 
         $mayusculas = fn (?string $texto): string => mb_strtoupper(trim((string) $texto));
-        $junto = fn (?string $primero, ?string $segundo): string => mb_strtoupper(trim(preg_replace('/\s+/', ' ', "{$primero} {$segundo}")));
+        $nombreCompleto = fn (SolicitudReferencia $s): string => mb_strtoupper(trim(preg_replace('/\s+/', ' ', "{$s->primer_nombre} {$s->segundo_nombre} {$s->primer_apellido} {$s->segundo_apellido}")));
         $hora = fn (mixed $valor): ?string => $valor ? substr((string) $valor, 0, 5) : null;
 
         SolicitudReferencia::query()
             ->where('estado', 'negado')
             ->orderBy('fecha')
             ->orderBy('hora')
-            ->chunk(500, function ($lote) use (&$filas, $mayusculas, $junto, $hora): void {
+            ->chunk(500, function ($lote) use (&$filas, $mayusculas, $nombreCompleto, $hora): void {
                 foreach ($lote as $s) {
                     $filas[] = [
-                        $s->fecha?->day,
-                        $s->fecha?->month,
-                        $s->fecha?->year,
+                        $s->fecha?->format('d/m/Y'),
                         $hora($s->hora),
-                        $junto($s->primer_nombre, $s->segundo_nombre),
-                        $junto($s->primer_apellido, $s->segundo_apellido),
+                        $nombreCompleto($s),
                         $s->genero,
                         $s->edad,
                         $s->tipo_documento,

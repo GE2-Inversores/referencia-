@@ -69,7 +69,7 @@ class InformeController extends Controller
 
         $ruta = tempnam(sys_get_temp_dir(), 'base');
 
-        XlsxWriter::guardar($ruta, ['NEGADOS' => $this->informes->filasBaseReferencia()], presentacion: true);
+        XlsxWriter::guardar($ruta, ['NEGADOS' => $this->informes->filasBaseReferencia()], presentacion: true, columnasIzquierda: [13, 14]);
 
         return response()
             ->download($ruta, 'BASE REFERENCIA_'.now()->toDateString().'.xlsx', [

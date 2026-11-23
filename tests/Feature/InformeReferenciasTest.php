@@ -394,7 +394,7 @@ class InformeReferenciasTest extends TestCase
         $this->assertStringContainsString('name="NEGADOS"', (string) $zip->getFromName('xl/workbook.xml'));
 
         $hoja = (string) $zip->getFromName('xl/worksheets/sheet1.xml');
-        foreach (['DIA', 'Municipio que capita', 'Hora de negado', 'Motivación de negación', 'Nombre de quien rechaza la remisión'] as $columna) {
+        foreach (['Fecha', 'Nombres y apellidos', 'Municipio que capita', 'Hora de negado', 'Motivación de negación', 'Nombre de quien rechaza la remisión'] as $columna) {
             $this->assertStringContainsString($columna, $hoja);
         }
 
@@ -421,7 +421,7 @@ class InformeReferenciasTest extends TestCase
     public function test_xlsx_writer_presentation_mode_is_well_formed_and_styled(): void
     {
         $ruta = tempnam(sys_get_temp_dir(), 'xlsx');
-        XlsxWriter::guardar($ruta, ['NEGADOS' => [['DIA', 'Paciente'], [1, 'ANA'], [2, null], [3, 'LUIS']]], presentacion: true);
+        XlsxWriter::guardar($ruta, ['NEGADOS' => [['DIA', 'Paciente'], [1, 'ANA'], [2, null], [3, 'LUIS']]], presentacion: true, columnasIzquierda: [1]);
 
         $zip = new ZipArchive;
         $this->assertTrue($zip->open($ruta));
@@ -438,7 +438,10 @@ class InformeReferenciasTest extends TestCase
         $this->assertStringContainsString('<autoFilter ref="A1:B4"/>', $hoja);
         $this->assertStringContainsString('state="frozen"', $hoja);
         // Las celdas vacías también llevan estilo para conservar el borde.
-        $this->assertStringContainsString('<c r="B3" s="3"/>', $hoja);
+        $this->assertStringContainsString('<c r="B3" s="5"/>', $hoja);
+        $this->assertStringContainsString('ht="22" customHeight="1"', $hoja);
+        // Solo el encabezado parte el texto en varias líneas; las filas de datos son de una línea.
+        $this->assertSame(1, substr_count($estilos, 'wrapText="1"'));
 
         $zip->close();
         unlink($ruta);
