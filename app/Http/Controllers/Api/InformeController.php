@@ -74,8 +74,8 @@ class InformeController extends Controller
             'NEGADOS' => $this->informes->filasBaseReferencia(),
             'ACEPTADOS' => $this->informes->filasBaseAceptados(),
         ], presentacion: true, columnasIzquierda: [
-            'NEGADOS' => [13, 14],
-            'ACEPTADOS' => [8, 9, 14, 15, 20],
+            'NEGADOS' => [14, 15],
+            'ACEPTADOS' => [8, 9, 14, 15, 21],
         ]);
 
         return response()

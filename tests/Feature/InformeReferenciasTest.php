@@ -394,7 +394,7 @@ class InformeReferenciasTest extends TestCase
         $this->assertStringContainsString('name="NEGADOS"', (string) $zip->getFromName('xl/workbook.xml'));
 
         $hoja = (string) $zip->getFromName('xl/worksheets/sheet1.xml');
-        foreach (['Fecha', 'Nombres y apellidos', 'Municipio que capita', 'Hora de negado', 'Motivación de negación', 'Nombre de quien rechaza la remisión'] as $columna) {
+        foreach (['Fecha', 'Nombres y apellidos', 'Municipio que capita', 'Fecha de negado', 'Hora de negado', 'Motivación de negación', 'Nombre de quien rechaza la remisión'] as $columna) {
             $this->assertStringContainsString($columna, $hoja);
         }
 
@@ -438,11 +438,11 @@ class InformeReferenciasTest extends TestCase
         $this->assertStringContainsString('name="NEGADOS"', $libro);
         $this->assertStringContainsString('name="ACEPTADOS"', $libro);
 
-        // NEGADOS lleva 16 columnas y ACEPTADOS las 24 del Drive.
+        // NEGADOS lleva 17 columnas y ACEPTADOS las 25 del Drive (con el día de la decisión).
         preg_match('/<row r="1".*?<\/row>/s', $negados, $encabezadoNegados);
         preg_match('/<row r="1".*?<\/row>/s', $aceptados, $encabezadoAceptados);
-        $this->assertSame(16, substr_count($encabezadoNegados[0], '<c '));
-        $this->assertSame(24, substr_count($encabezadoAceptados[0], '<c '));
+        $this->assertSame(17, substr_count($encabezadoNegados[0], '<c '));
+        $this->assertSame(25, substr_count($encabezadoAceptados[0], '<c '));
 
         $this->assertStringContainsString('Hora de negado', $negados);
         $this->assertStringContainsString('NEGADA PRUEBA', $negados);
@@ -450,7 +450,7 @@ class InformeReferenciasTest extends TestCase
         // Las dos negadas salen aquí: la de decisión y la que no llegó.
         $this->assertSame(3, substr_count($negados, '<row '));
 
-        foreach (['Diagnóstico', 'Institución de origen', 'Resumen de historia clínica', 'Hora de aceptado', 'Hora de llegada', 'Estado', 'Motivo no ingreso', 'Otras observaciones', 'Código aceptación', 'N° ingreso', 'Nombre de quien acepta la remisión', 'ACEPTADA PRUEBA', 'INGRESO PRUEBA', 'NOLLEGO PRUEBA', 'BRENDA AVILA', 'REF1', 'Alta Voluntaria'] as $esperado) {
+        foreach (['Diagnóstico', 'Institución de origen', 'Resumen de historia clínica', 'Fecha de aceptado', 'Hora de aceptado', 'Hora de llegada', 'Estado', 'Motivo no ingreso', 'Otras observaciones', 'Código aceptación', 'N° ingreso', 'Nombre de quien acepta la remisión', 'ACEPTADA PRUEBA', 'INGRESO PRUEBA', 'NOLLEGO PRUEBA', 'BRENDA AVILA', 'REF1', 'Alta Voluntaria', '8:15 AM', '9:00 AM'] as $esperado) {
             $this->assertStringContainsString($esperado, $aceptados);
         }
         // La que ingresó marca SI; la que está en espera y la que no llegó, NO.

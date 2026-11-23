@@ -127,9 +127,10 @@ class InformeReferenciaService
      */
     public function filasBaseReferencia(): array
     {
-        $filas = [[...self::ENCABEZADO_PACIENTE, 'Hora de negado', 'Motivación de negación', 'Observación', 'Nombre de quien rechaza la remisión']];
+        $filas = [[...self::ENCABEZADO_PACIENTE, 'Fecha de negado', 'Hora de negado', 'Motivación de negación', 'Observación', 'Nombre de quien rechaza la remisión']];
 
         SolicitudReferencia::query()
+            ->with(['eventos:id,solicitud_referencia_id,tipo,created_at'])
             ->where('estado', 'negado')
             ->orderBy('fecha')
             ->orderBy('hora')
@@ -137,7 +138,8 @@ class InformeReferenciaService
                 foreach ($lote as $s) {
                     $filas[] = [
                         ...$this->columnasPaciente($s),
-                        $this->horaCorta($s->hora_respuesta),
+                        $this->fechaEvento($s, ['negado']),
+                        $this->horaAmPm($s->hora_respuesta),
                         $this->enMayusculas($s->motivo_negacion ?: $s->motivo_no_ingreso),
                         $s->observaciones_respuesta,
                         $this->enMayusculas($s->nombre_quien_responde),
@@ -165,13 +167,13 @@ class InformeReferenciaService
             'Número de documento', 'EPS', 'Diagnóstico', 'Institución de origen',
             'Municipio que capita', 'Especialidad requerida', 'Servicio ubicación actual',
             'Servicio al que se remite', 'Resumen de historia clínica', 'Observación',
-            'Hora de aceptado', 'Hora de llegada', 'Estado', 'Motivo no ingreso',
+            'Fecha de aceptado', 'Hora de aceptado', 'Hora de llegada', 'Estado', 'Motivo no ingreso',
             'Otras observaciones', 'Código aceptación', 'N° ingreso',
             'Nombre de quien acepta la remisión',
         ]];
 
         SolicitudReferencia::query()
-            ->with(['clinica:id,nombre', 'diagnosticos'])
+            ->with(['clinica:id,nombre', 'diagnosticos', 'eventos:id,solicitud_referencia_id,tipo,created_at'])
             ->where(fn ($q) => $q->whereIn('estado', ['en_espera', 'completado'])
                 ->orWhere(fn ($q2) => $q2->where('estado', 'negado')->whereNotNull('motivo_no_ingreso')->where('motivo_no_ingreso', '!=', '')))
             ->orderBy('fecha')
@@ -180,7 +182,7 @@ class InformeReferenciaService
                 foreach ($lote as $s) {
                     $filas[] = [
                         $s->fecha?->format('d/m/Y'),
-                        $this->horaCorta($s->hora),
+                        $this->horaAmPm($s->hora),
                         $this->nombreCompleto($s),
                         $s->genero,
                         $s->edad,
@@ -195,8 +197,9 @@ class InformeReferenciaService
                         $this->enMayusculas($s->servicio_remision ?: $s->servicio_ubicacion_actual),
                         $s->resumen_historia_clinica,
                         $s->observaciones_respuesta,
-                        $this->horaCorta($s->hora_respuesta),
-                        $this->horaCorta($s->hora_llegada),
+                        $this->fechaEvento($s, ['en_espera', 'pendiente_cama']),
+                        $this->horaAmPm($s->hora_respuesta),
+                        $this->horaAmPm($s->hora_llegada),
                         $s->estado === 'completado' ? 'SI' : 'NO',
                         $s->motivo_no_ingreso,
                         $s->observaciones,
@@ -219,7 +222,7 @@ class InformeReferenciaService
     {
         return [
             $s->fecha?->format('d/m/Y'),
-            $this->horaCorta($s->hora),
+            $this->horaAmPm($s->hora),
             $this->nombreCompleto($s),
             $s->genero,
             $s->edad,
@@ -259,6 +262,38 @@ class InformeReferenciaService
     private function horaCorta(mixed $valor): ?string
     {
         return $valor ? substr((string) $valor, 0, 5) : null;
+    }
+
+    /**
+     * Hora en formato de 12 horas con AM/PM, como las usa el equipo
+     * («3:10 PM», «12:30 AM»).
+     */
+    private function horaAmPm(mixed $valor): ?string
+    {
+        $hora = $this->horaCorta($valor);
+
+        if ($hora === null) {
+            return null;
+        }
+
+        [$h, $m] = array_map('intval', explode(':', $hora));
+
+        return ($h % 12 ?: 12).':'.str_pad((string) $m, 2, '0', STR_PAD_LEFT).' '.($h >= 12 ? 'PM' : 'AM');
+    }
+
+    /**
+     * Fecha en que se tomó la decisión (d/m/Y): el evento que la registró —
+     * por ejemplo «en_espera» al aceptar o «negado» al cerrar — o, para los
+     * registros sin línea de tiempo, la última modificación de la solicitud.
+     *
+     * @param  array<int, string>  $tipos
+     */
+    private function fechaEvento(SolicitudReferencia $s, array $tipos): ?string
+    {
+        $evento = $s->eventos->first(fn ($e): bool => in_array($e->tipo, $tipos, true))
+            ?? $s->eventos->firstWhere('tipo', 'cambio_estado');
+
+        return ($evento?->created_at ?? $s->updated_at)?->format('d/m/Y');
     }
 
     /**
