@@ -420,9 +420,10 @@ class InformeReferenciasTest extends TestCase
 
     public function test_base_export_is_one_workbook_with_a_denied_tab_and_an_accepted_tab(): void
     {
-        $this->solicitud('en_espera', '2026-11-05', ['lugar_llegada' => 'UCI', 'hora_respuesta' => '08:15:00', 'nombre_quien_responde' => 'Brenda Avila', 'primer_nombre' => 'Aceptada']);
-        $this->solicitud('completado', '2026-11-06', ['lugar_llegada' => 'Urgencias', 'primer_nombre' => 'Ingreso']);
-        $this->solicitud('negado', '2026-11-07', ['primer_nombre' => 'Negada']);
+        $this->solicitud('en_espera', '2026-11-05', ['lugar_llegada' => 'UCI', 'hora_respuesta' => '08:15:00', 'nombre_quien_responde' => 'Brenda Avila', 'primer_nombre' => 'Aceptada', 'codigo_aceptacion' => 'REF1']);
+        $this->solicitud('completado', '2026-11-06', ['lugar_llegada' => 'Urgencias', 'primer_nombre' => 'Ingreso', 'numero_ingreso' => 361863]);
+        $this->solicitud('negado', '2026-11-07', ['primer_nombre' => 'Negada', 'motivo_negacion' => 'No cupo']);
+        $this->solicitud('negado', '2026-11-07', ['primer_nombre' => 'NoLlego', 'motivo_no_ingreso' => 'Alta Voluntaria']);
         $this->solicitud('pendiente_cama', '2026-11-08', ['primer_nombre' => 'Pendiente']);
 
         $respuesta = $this->actingAs($this->staff())->get('/api/informes/exportar-base')->assertOk();
@@ -437,23 +438,28 @@ class InformeReferenciasTest extends TestCase
         $this->assertStringContainsString('name="NEGADOS"', $libro);
         $this->assertStringContainsString('name="ACEPTADOS"', $libro);
 
-        // Cada pestaña lleva 16 columnas en el mismo orden, y solo lo suyo.
-        foreach ([$negados, $aceptados] as $hoja) {
-            preg_match('/<row r="1".*?<\/row>/s', $hoja, $encabezado);
-            $this->assertSame(16, substr_count($encabezado[0], '<c '));
-        }
+        // NEGADOS lleva 16 columnas y ACEPTADOS las 24 del Drive.
+        preg_match('/<row r="1".*?<\/row>/s', $negados, $encabezadoNegados);
+        preg_match('/<row r="1".*?<\/row>/s', $aceptados, $encabezadoAceptados);
+        $this->assertSame(16, substr_count($encabezadoNegados[0], '<c '));
+        $this->assertSame(24, substr_count($encabezadoAceptados[0], '<c '));
 
         $this->assertStringContainsString('Hora de negado', $negados);
         $this->assertStringContainsString('NEGADA PRUEBA', $negados);
         $this->assertStringNotContainsString('ACEPTADA PRUEBA', $negados);
-        $this->assertSame(2, substr_count($negados, '<row '));
+        // Las dos negadas salen aquí: la de decisión y la que no llegó.
+        $this->assertSame(3, substr_count($negados, '<row '));
 
-        foreach (['Hora de aceptación', 'Servicio de llegada', 'Nombre de quien acepta la remisión', 'ACEPTADA PRUEBA', 'INGRESO PRUEBA', 'BRENDA AVILA'] as $esperado) {
+        foreach (['Diagnóstico', 'Institución de origen', 'Resumen de historia clínica', 'Hora de aceptado', 'Hora de llegada', 'Estado', 'Motivo no ingreso', 'Otras observaciones', 'Código aceptación', 'N° ingreso', 'Nombre de quien acepta la remisión', 'ACEPTADA PRUEBA', 'INGRESO PRUEBA', 'NOLLEGO PRUEBA', 'BRENDA AVILA', 'REF1', 'Alta Voluntaria'] as $esperado) {
             $this->assertStringContainsString($esperado, $aceptados);
         }
+        // La que ingresó marca SI; la que está en espera y la que no llegó, NO.
+        $this->assertStringContainsString('>SI<', $aceptados);
+        $this->assertSame(2, substr_count($aceptados, '>NO<'));
+        $this->assertStringContainsString('<v>361863</v>', $aceptados);
         $this->assertStringNotContainsString('NEGADA PRUEBA', $aceptados);
         $this->assertStringNotContainsString('PENDIENTE PRUEBA', $aceptados);
-        $this->assertSame(3, substr_count($aceptados, '<row '));
+        $this->assertSame(4, substr_count($aceptados, '<row '));
     }
 
     public function test_xlsx_writer_presentation_mode_is_well_formed_and_styled(): void

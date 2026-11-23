@@ -17,9 +17,11 @@ class XlsxWriter
      * bordes suaves, filas alternadas y filtros en el encabezado. Las filas
      * son compactas (una línea): quien quiera leer un texto largo agranda la
      * fila. $columnasIzquierda (índices desde 0) alinea a la izquierda las
-     * columnas de texto largo para que se lea su inicio.
+     * columnas de texto largo para que se lea su inicio: una lista plana se
+     * aplica a todas las hojas y un mapa (nombre de hoja => índices) da a
+     * cada hoja los suyos.
      *
-     * @param  array<int, int>  $columnasIzquierda
+     * @param  array<int|string, int|array<int, int>>  $columnasIzquierda
      * @param  array<string, array<int, array<int, string|int|float|null>>>  $hojas
      */
     public static function guardar(string $ruta, array $hojas, bool $presentacion = false, array $columnasIzquierda = []): void
@@ -54,11 +56,28 @@ class XlsxWriter
         $zip->addFromString('xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'.$relaciones.'<Relationship Id="rId'.($total + 1).'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
         $zip->addFromString('xl/styles.xml', $presentacion ? self::estilosDePresentacion() : '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF16468E"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs></styleSheet>');
 
-        foreach (array_values($hojas) as $i => $filas) {
-            $zip->addFromString('xl/worksheets/sheet'.($i + 1).'.xml', self::hoja(array_values($filas), $presentacion, $columnasIzquierda));
+        $i = 0;
+        foreach ($hojas as $nombre => $filas) {
+            $i++;
+            $zip->addFromString('xl/worksheets/sheet'.$i.'.xml', self::hoja(array_values($filas), $presentacion, self::izquierdas($columnasIzquierda, (string) $nombre)));
         }
 
         $zip->close();
+    }
+
+    /**
+     * Índices de columnas alineadas a la izquierda de una hoja: respeta un
+     * mapa por nombre de hoja y, si la hoja no aparece, la lista plana.
+     *
+     * @param  array<int|string, int|array<int, int>>  $columnasIzquierda
+     * @return array<int, int>
+     */
+    private static function izquierdas(array $columnasIzquierda, string $hoja): array
+    {
+        $config = $columnasIzquierda[$hoja] ?? $columnasIzquierda;
+        $valores = is_array($config) ? $config : [$config];
+
+        return array_values(array_filter($valores, 'is_int'));
     }
 
     /**

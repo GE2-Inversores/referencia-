@@ -73,7 +73,10 @@ class InformeController extends Controller
         XlsxWriter::guardar($ruta, [
             'NEGADOS' => $this->informes->filasBaseReferencia(),
             'ACEPTADOS' => $this->informes->filasBaseAceptados(),
-        ], presentacion: true, columnasIzquierda: [13, 14]);
+        ], presentacion: true, columnasIzquierda: [
+            'NEGADOS' => [13, 14],
+            'ACEPTADOS' => [8, 9, 14, 15, 20],
+        ]);
 
         return response()
             ->download($ruta, 'BASE REFERENCIA_'.now()->toDateString().'.xlsx', [

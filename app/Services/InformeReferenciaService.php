@@ -149,28 +149,59 @@ class InformeReferenciaService
     }
 
     /**
-     * Base de aceptados para descargar en Excel, con las mismas columnas y
-     * el mismo orden que la de negados: en lugar de la negación llevan la
-     * aceptación (hora, servicio de llegada, observación y quién aceptó).
-     * Incluye las que ya ingresaron y las que aún no llegan.
+     * Base de aceptados para descargar en Excel, con las columnas de la hoja
+     * ACEPTADOS del Drive: además de los datos del paciente lleva el estado
+     * (SI ingresó, NO aún no llega o no llegó), el motivo de no ingreso, el
+     * código de aceptación y el número de ingreso. Incluye las que están en
+     * espera, las que ya ingresaron y las que se aceptaron pero el paciente
+     * nunca llegó (están también en la pestaña de negados).
      *
      * @return array<int, array<int, string|int|null>>
      */
     public function filasBaseAceptados(): array
     {
-        $filas = [[...self::ENCABEZADO_PACIENTE, 'Hora de aceptación', 'Servicio de llegada', 'Observación', 'Nombre de quien acepta la remisión']];
+        $filas = [[
+            'Fecha', 'Hora', 'Nombres y apellidos', 'Género', 'Edad', 'Tipo de documento',
+            'Número de documento', 'EPS', 'Diagnóstico', 'Institución de origen',
+            'Municipio que capita', 'Especialidad requerida', 'Servicio ubicación actual',
+            'Servicio al que se remite', 'Resumen de historia clínica', 'Observación',
+            'Hora de aceptado', 'Hora de llegada', 'Estado', 'Motivo no ingreso',
+            'Otras observaciones', 'Código aceptación', 'N° ingreso',
+            'Nombre de quien acepta la remisión',
+        ]];
 
         SolicitudReferencia::query()
-            ->whereIn('estado', ['en_espera', 'completado'])
+            ->with(['clinica:id,nombre', 'diagnosticos'])
+            ->where(fn ($q) => $q->whereIn('estado', ['en_espera', 'completado'])
+                ->orWhere(fn ($q2) => $q2->where('estado', 'negado')->whereNotNull('motivo_no_ingreso')->where('motivo_no_ingreso', '!=', '')))
             ->orderBy('fecha')
             ->orderBy('hora')
             ->chunk(500, function ($lote) use (&$filas): void {
                 foreach ($lote as $s) {
                     $filas[] = [
-                        ...$this->columnasPaciente($s),
-                        $this->horaCorta($s->hora_respuesta),
-                        $this->enMayusculas($s->lugar_llegada),
+                        $s->fecha?->format('d/m/Y'),
+                        $this->horaCorta($s->hora),
+                        $this->nombreCompleto($s),
+                        $s->genero,
+                        $s->edad,
+                        $s->tipo_documento,
+                        $s->numero_documento,
+                        $s->eps,
+                        $this->diagnosticoBase($s),
+                        $this->enMayusculas($s->clinica?->nombre ?? $s->institucion_remitente),
+                        $this->enMayusculas($s->municipio_capita),
+                        $this->enMayusculas($s->especialidad_requerida),
+                        $this->enMayusculas($s->servicio_ubicacion_actual),
+                        $this->enMayusculas($s->servicio_remision ?: $s->servicio_ubicacion_actual),
+                        $s->resumen_historia_clinica,
                         $s->observaciones_respuesta,
+                        $this->horaCorta($s->hora_respuesta),
+                        $this->horaCorta($s->hora_llegada),
+                        $s->estado === 'completado' ? 'SI' : 'NO',
+                        $s->motivo_no_ingreso,
+                        $s->observaciones,
+                        $s->codigo_aceptacion,
+                        $s->numero_ingreso,
                         $this->enMayusculas($s->nombre_quien_responde),
                     ];
                 }
@@ -180,7 +211,7 @@ class InformeReferenciaService
     }
 
     /**
-     * Las 12 primeras columnas de las bases en Excel, iguales para negados y aceptados.
+     * Las 12 primeras columnas de la base de negados en Excel.
      *
      * @return array<int, string|int|null>
      */
@@ -189,7 +220,7 @@ class InformeReferenciaService
         return [
             $s->fecha?->format('d/m/Y'),
             $this->horaCorta($s->hora),
-            $this->enMayusculas(preg_replace('/\s+/', ' ', "{$s->primer_nombre} {$s->segundo_nombre} {$s->primer_apellido} {$s->segundo_apellido}")),
+            $this->nombreCompleto($s),
             $s->genero,
             $s->edad,
             $s->tipo_documento,
@@ -200,6 +231,24 @@ class InformeReferenciaService
             $this->enMayusculas($s->servicio_ubicacion_actual),
             $this->enMayusculas($s->servicio_remision ?: $s->servicio_ubicacion_actual),
         ];
+    }
+
+    private function nombreCompleto(SolicitudReferencia $s): string
+    {
+        return $this->enMayusculas(preg_replace('/\s+/', ' ', "{$s->primer_nombre} {$s->segundo_nombre} {$s->primer_apellido} {$s->segundo_apellido}"));
+    }
+
+    /**
+     * Diagnóstico como en el Drive: código CIE-10 y descripción del
+     * diagnóstico principal; si no hay, el texto de la solicitud.
+     */
+    private function diagnosticoBase(SolicitudReferencia $s): string
+    {
+        $diagnostico = $s->diagnosticos->first();
+
+        return $this->enMayusculas($diagnostico
+            ? trim("{$diagnostico->codigo_cie10} {$diagnostico->descripcion}")
+            : $s->diagnostico);
     }
 
     private function enMayusculas(?string $texto): string
