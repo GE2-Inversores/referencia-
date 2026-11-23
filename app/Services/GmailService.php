@@ -281,71 +281,116 @@ class GmailService
     }
 
     /**
-     * Busca el correo en el buzón para bajar algo de él (adjuntos, metadata):
-     * primero en INBOX y, si no aparece, en la carpeta "Todos" — en Gmail el
-     * UID es el mismo en todas las carpetas, así un correo archivado o movido
-     * fuera de la entrada sigue siendo accesible.
+     * Busca el correo en el buzón para bajar algo de él (adjuntos, metadata).
+     * En Gmail cada carpeta numera sus UID por separado: el UID guardado solo
+     * vale para INBOX. Si el correo ya no está ahí (archivado o movido), se
+     * busca por su Message-ID en «Todos» y, si la fila es vieja y no lo
+     * tiene, por remitente, asunto y fecha.
      */
     private function encontrarRemotoImap(InboxMensaje $mensaje): ?ImapMessage
     {
         $mailbox = $this->imapMailbox();
 
         if (str_starts_with((string) $mensaje->gmail_id, 'imap-')) {
-            $uid = (int) str_replace('imap-', '', (string) $mensaje->gmail_id);
-
-            // En Gmail el UID es el mismo en todas las carpetas: un correo
-            // archivado o movido fuera de la entrada sigue en "Todos".
-            $remoto = $mailbox->inbox()->messages()->find($uid)
-                ?? $this->carpetaTodos($mailbox)?->messages()->find($uid);
+            $remoto = $mailbox->inbox()->messages()->find((int) str_replace('imap-', '', (string) $mensaje->gmail_id));
 
             if ($remoto) {
                 return $remoto;
             }
         }
 
-        // Último recurso: el Message-ID (guardado en thread_id) identifica el
-        // correo aunque su UID haya cambiado o se haya sincronizado por otro modo.
-        return $this->buscarPorMessageId($mailbox, $mensaje);
+        return $this->buscarPorMessageId($mailbox, $mensaje) ?? $this->buscarPorRemitenteYAsunto($mailbox, $mensaje);
     }
 
     /**
-     * Busca el correo por su Message-ID (guardado en thread_id, recortado a
-     * 40 caracteres) recorriendo las carpetas del buzón. SEARCH compara por
-     * coincidencia parcial, así que el fragmento alcanza.
+     * Carpetas donde puede estar un correo: «Todos» (tiene todo lo no
+     * borrado, incluso lo archivado y lo etiquetado), la entrada, la papelera
+     * y el spam. Se evita recorrer las decenas de etiquetas del buzón: Gmail
+     * las lista como carpetas pero son lentas y algunas no se pueden abrir.
+     *
+     * @return array<int, FolderInterface>
+     */
+    private function carpetasDeBusqueda(Mailbox $mailbox): array
+    {
+        $carpetas = [];
+
+        if ($todos = $this->carpetaTodos($mailbox)) {
+            $carpetas[] = $todos;
+        }
+
+        $carpetas[] = $mailbox->inbox();
+
+        foreach ($mailbox->folders()->get() as $carpeta) {
+            if (array_intersect(['\Trash', '\Junk'], $carpeta->flags()) !== []) {
+                $carpetas[] = $carpeta;
+            }
+        }
+
+        return $carpetas;
+    }
+
+    /**
+     * Busca el correo por su Message-ID (completo, o recortado a 40
+     * caracteres en las filas viejas): SEARCH compara por coincidencia
+     * parcial, así que el fragmento alcanza.
      */
     private function buscarPorMessageId(Mailbox $mailbox, InboxMensaje $mensaje): ?ImapMessage
     {
-        // Se busca por el Message-ID del propio correo (identificadorCorreo),
-        // no por thread_id: con la agrupación por hilos ese campo guarda la
-        // clave de la conversación y podría encontrar un mensaje distinto.
-        $fragmento = trim((string) ($mensaje->identificadorCorreo() ?? ''));
+        $fragmento = $mensaje->fragmentoMessageId();
 
-        if ($fragmento === '') {
+        if ($fragmento === null) {
             return null;
         }
 
-        foreach ($mailbox->folders()->get() as $carpeta) {
-            // Gmail lista etiquetas que no se pueden abrir como carpeta
-            // (padres de otras etiquetas, borradas o renombradas): se saltan
-            // en vez de abortar toda la búsqueda.
-            if (in_array('\\Noselect', $carpeta->flags(), true)) {
-                continue;
-            }
-
+        foreach ($this->carpetasDeBusqueda($mailbox) as $carpeta) {
             try {
                 $carpeta->select(true);
-                $uids = collect($mailbox->connection()->search(['HEADER', 'Message-ID', $fragmento])->tokensAfter(2))
-                    ->map->value;
+                $uid = collect($mailbox->connection()->search(['HEADER', 'Message-ID', '"'.str_replace(['"', '\\'], '', $fragmento).'"'])->tokensAfter(2))
+                    ->map->value
+                    ->first();
 
-                if ($uids->isNotEmpty()) {
-                    return $carpeta->messages()->find((int) $uids->first());
+                if ($uid !== null && ($remoto = $carpeta->messages()->find((int) $uid))) {
+                    return $remoto;
                 }
-            } catch (Throwable) {
-                continue;
+            } catch (Throwable $e) {
+                Log::info('Bandeja: no se pudo buscar el correo en una carpeta.', ['carpeta' => $carpeta->path(), 'error' => $e->getMessage()]);
             }
         }
 
         return null;
+    }
+
+    /**
+     * Último recurso para filas viejas sin Message-ID: busca en «Todos» por
+     * remitente y asunto el día del correo, y se queda con el más cercano a
+     * la hora en que llegó.
+     */
+    private function buscarPorRemitenteYAsunto(Mailbox $mailbox, InboxMensaje $mensaje): ?ImapMessage
+    {
+        $palabras = collect(preg_split('/\s+/u', preg_replace('/[^\p{L}\p{N}\s]/u', ' ', (string) $mensaje->asunto) ?? '', -1, PREG_SPLIT_NO_EMPTY))
+            ->reject(fn (string $p): bool => in_array(mb_strtolower($p), ['re', 'rv', 'fwd', 'fw'], true))
+            ->take(8)
+            ->implode(' ');
+
+        if ($palabras === '' || ! $mensaje->remitente_email || ! $mensaje->recibido_en || ! ($todos = $this->carpetaTodos($mailbox))) {
+            return null;
+        }
+
+        try {
+            $todos->select(true);
+            $consulta = "from:{$mensaje->remitente_email} subject:({$palabras}) after:".($mensaje->recibido_en->timestamp - 86400).' before:'.($mensaje->recibido_en->timestamp + 86400);
+            $uids = collect($mailbox->connection()->search(['X-GM-RAW', '"'.$consulta.'"'])->tokensAfter(2))->map->value->take(10);
+
+            return $uids
+                ->map(fn ($uid): ?ImapMessage => $todos->messages()->withHeaders()->find((int) $uid))
+                ->filter()
+                ->sortBy(fn (ImapMessage $m): int => abs(($m->date()?->timestamp ?? 0) - $mensaje->recibido_en->timestamp))
+                ->first();
+        } catch (Throwable $e) {
+            Log::info('Bandeja: falló la búsqueda del correo por remitente y asunto.', ['mensaje' => $mensaje->id, 'error' => $e->getMessage()]);
+
+            return null;
+        }
     }
 
     /**

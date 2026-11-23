@@ -40,8 +40,9 @@ class SolicitudReferenciaController extends Controller
         // Lista liviana: los adjuntos, las evoluciones y el texto de los eventos solo se usan al abrir
         // el detalle, y se piden entonces con show() — así el refresco de cada 30 s pesa mucho menos.
         $solicitudes = SolicitudReferencia::with(['clinica', 'diagnosticos', 'eventos:id,solicitud_referencia_id,tipo,titulo,created_at'])
+            ->withCount(['evoluciones as evoluciones_sin_ver' => fn ($q) => $q->whereNull('visto_at')])
             ->whereIn('estado', ['pendiente', 'pendiente_cama', 'en_espera'])
-            ->orderByRaw("FIELD(estado, 'pendiente', 'pendiente_cama', 'en_espera')")
+            ->orderByRaw("CASE estado WHEN 'pendiente' THEN 1 WHEN 'pendiente_cama' THEN 2 ELSE 3 END")
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -1156,6 +1157,19 @@ class SolicitudReferenciaController extends Controller
                 'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             ])
             ->deleteFileAfterSend();
+    }
+
+    /**
+     * El personal abrió las evoluciones de la solicitud: dejan de contar
+     * como nuevas en la lista, para todos los usuarios.
+     */
+    public function marcarEvolucionesVistas(SolicitudReferencia $solicitud): JsonResponse
+    {
+        abort_unless(request()->user()->hasPermission('clinicas.view'), Response::HTTP_FORBIDDEN);
+
+        $solicitud->evoluciones()->whereNull('visto_at')->update(['visto_at' => now()]);
+
+        return response()->json(['data' => ['evoluciones_sin_ver' => 0]]);
     }
 
     public function descargarAdjunto(SolicitudReferencia $solicitud, SolicitudReferenciaAdjunto $adjunto): BinaryFileResponse

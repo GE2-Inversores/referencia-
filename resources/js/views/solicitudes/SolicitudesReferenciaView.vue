@@ -236,13 +236,13 @@
                         circle
                         size="small"
                         class="sol-evoluciones-btn"
-                        :title="`Ver evoluciones (${contarEvoluciones(s)})`"
+                        :title="tituloEvoluciones(s)"
                         aria-label="Ver evoluciones del paciente"
                         @click="verEvoluciones(s)"
                       >
                         <component :is="ActivityIcon" class="w-3.5 h-3.5" />
                       </el-button>
-                      <span class="sol-evo-count">{{ contarEvoluciones(s) }}</span>
+                      <span v-if="evolucionesSinVer(s) > 0" class="sol-evo-count">{{ evolucionesSinVer(s) }}</span>
                     </span>
                     <el-dropdown v-if="s.estado !== 'completado'" trigger="click" placement="bottom-end" :popper-options="{ modifiers: [{ name: 'offset', options: { offset: [8, 8] } }] }" popper-class="sol-acciones-menu" @command="(cmd: string) => manejarAccionFila(cmd, s)">
                       <el-button circle size="small" title="Más acciones" aria-label="Más acciones de la solicitud" :loading="enviandoGomedisysId === s.id || consultandoIngresoId === s.id">
@@ -1554,6 +1554,7 @@ interface Clinica {
 
 interface Solicitud {
   id: number;
+  evoluciones_sin_ver?: number;
   clinica_id: number | null;
   clinica?: Clinica;
   institucion_remitente?: string;
@@ -2419,6 +2420,16 @@ function contarEvoluciones(solicitud: Solicitud): number {
   return (solicitud.eventos ?? []).filter(evento => evento.tipo === 'evolucion').length;
 }
 
+// Solo las que el personal todavía no ha abierto: el número del botón se quita al verlas.
+function evolucionesSinVer(solicitud: Solicitud): number {
+  return solicitud.evoluciones_sin_ver ?? 0;
+}
+
+function tituloEvoluciones(solicitud: Solicitud): string {
+  const sinVer = evolucionesSinVer(solicitud);
+  return `Ver evoluciones (${contarEvoluciones(solicitud)})` + (sinVer > 0 ? ` · ${sinVer} sin ver` : '');
+}
+
 function tieneEvoluciones(solicitud: Solicitud): boolean {
   return contarEvoluciones(solicitud) > 0;
 }
@@ -2449,6 +2460,11 @@ async function verEvoluciones(listada: Solicitud): Promise<void> {
   if (!solicitud) return;
   solicitudSeleccionada.value = solicitud;
   modalEvoluciones.value = true;
+
+  if (evolucionesSinVer(listada) > 0) {
+    listada.evoluciones_sin_ver = 0;
+    http.post(`/api/solicitudes-referencia/${listada.id}/evoluciones/vistas`).catch(() => { /* Se volverá a marcar al abrir de nuevo. */ });
+  }
 }
 
 function cerrarDetalle() {

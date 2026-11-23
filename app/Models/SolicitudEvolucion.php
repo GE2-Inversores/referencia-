@@ -13,7 +13,13 @@ class SolicitudEvolucion extends Model
     protected $fillable = [
         'solicitud_referencia_id',
         'nota',
+        'visto_at',
     ];
+
+    protected function casts(): array
+    {
+        return ['visto_at' => 'datetime'];
+    }
 
     public function solicitud(): BelongsTo
     {

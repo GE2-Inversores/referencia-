@@ -14,6 +14,19 @@ use Tests\TestCase;
 
 class SincronizacionBandejaTest extends TestCase
 {
+    public function test_el_fragmento_de_busqueda_usa_message_id_o_el_thread_id_recortado_de_las_filas_viejas(): void
+    {
+        $nuevo = new InboxMensaje(['gmail_id' => 'imap-10', 'message_id' => '<CAB+abcdefghijklmnop@mail.gmail.com>', 'thread_id' => 'otro-hilo']);
+        $viejo = new InboxMensaje(['gmail_id' => 'imap-11', 'thread_id' => 'CAB+abcdefghijklmnopqrstuvwxyz0123456789']);
+        $api = new InboxMensaje(['gmail_id' => '18c0a1b2c3d4e5f6', 'thread_id' => '18c0a1b2c3d4e5f6']);
+        $corto = new InboxMensaje(['gmail_id' => 'imap-12', 'thread_id' => 'abc']);
+
+        $this->assertSame('CAB+abcdefghijklmnop@mail.gmail.com', $nuevo->fragmentoMessageId());
+        $this->assertSame('CAB+abcdefghijklmnopqrstuvwxyz0123456789', $viejo->fragmentoMessageId());
+        $this->assertNull($api->fragmentoMessageId());
+        $this->assertNull($corto->fragmentoMessageId());
+    }
+
     use RefreshDatabase;
 
     private function staff(): User

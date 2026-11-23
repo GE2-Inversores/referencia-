@@ -110,6 +110,25 @@ class InboxMensaje extends Model
     }
 
     /**
+     * Texto con el que buscar este correo por Message-ID en el buzón, sin
+     * corchetes (SEARCH compara por coincidencia parcial). En las filas
+     * IMAP viejas, que no tienen message_id, thread_id guardaba el
+     * Message-ID recortado a 40 caracteres: también sirve como fragmento.
+     */
+    public function fragmentoMessageId(): ?string
+    {
+        $id = trim((string) $this->message_id);
+
+        if ($id === '' && str_starts_with((string) $this->gmail_id, 'imap-')) {
+            $id = trim((string) $this->thread_id);
+        }
+
+        $id = trim($id, "<> \t");
+
+        return mb_strlen($id) >= 12 ? $id : null;
+    }
+
+    /**
      * Encabezados In-Reply-To y References para responder dentro del mismo
      * hilo: sin ellos el cliente de correo del destinatario abre una
      * conversación nueva y la respuesta pierde el contexto.
