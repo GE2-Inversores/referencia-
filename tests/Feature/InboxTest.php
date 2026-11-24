@@ -163,6 +163,20 @@ class InboxTest extends TestCase
             ->assertJsonPath('data.0.etiquetas', ['\\Inbox', 'PACIENTES NO RED']);
     }
 
+    public function test_respuesta_en_entrada_muestra_etiquetas_del_hilo_archivado(): void
+    {
+        $this->correo(['thread_id' => 'prueba-etiqueta', 'carpeta' => 'Contestados', 'etiquetas' => ['PRUEBA', 'SENT']]);
+        $nuevo = $this->correo(['thread_id' => 'prueba-etiqueta', 'etiquetas' => ['INBOX']]);
+        $this->correo(['thread_id' => 'otro-hilo', 'carpeta' => 'Contestados', 'etiquetas' => ['OTRA']]);
+
+        $this->actingAs($this->staff())
+            ->getJson('/api/inbox')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $nuevo->id)
+            ->assertJsonPath('data.0.etiquetas', ['INBOX', 'PRUEBA']);
+    }
+
     public function test_meta_sugiere_solo_las_etiquetas_personalizadas(): void
     {
         $this->correo(['etiquetas' => ['\\Inbox', 'PACIENTES NO RED']]);
@@ -264,6 +278,26 @@ class InboxTest extends TestCase
         $this->actingAs($staff)
             ->getJson('/api/inbox?carpeta=Contestados')
             ->assertJsonCount(1, 'data');
+    }
+
+    public function test_hilo_conserva_cada_respuesta_enviada_y_su_contenido(): void
+    {
+        $correo = $this->correo();
+        $otro = $this->correo();
+        $this->actingAs($this->staff());
+
+        foreach (['Primera respuesta', 'Segunda respuesta'] as $cuerpo) {
+            $this->postJson("/api/inbox/{$correo->id}/responder", ['cuerpo' => $cuerpo])->assertOk();
+        }
+
+        $this->getJson("/api/inbox/{$correo->id}/hilo")
+            ->assertOk()
+            ->assertJsonCount(2, 'respuestas')
+            ->assertJsonPath('respuestas.0.cuerpo_texto', 'Primera respuesta')
+            ->assertJsonPath('respuestas.1.cuerpo_texto', 'Segunda respuesta')
+            ->assertJsonPath('data.0.cuerpo_texto', 'Contenido del correo');
+
+        $this->getJson("/api/inbox/{$otro->id}/hilo")->assertJsonCount(0, 'respuestas');
     }
 
     public function test_responder_exige_el_cuerpo_del_mensaje(): void

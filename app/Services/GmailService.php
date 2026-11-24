@@ -948,6 +948,7 @@ class GmailService
         }
 
         $datos['thread_id'] ??= $this->resolverHilo($datos);
+        $this->heredarEtiquetasDelHilo($datos);
 
         try {
             InboxEstadistica::sumar('recibidos', InboxMensaje::create($datos)->recibido_en);
@@ -1091,6 +1092,37 @@ class GmailService
      *
      * @param  array<string, mixed>  $datos
      */
+    /**
+     * Un correo que llega respondiendo un hilo ya conocido hereda las
+     * etiquetas personalizadas de ese hilo: Gmail etiqueta por conversación
+     * pero el X-GM-LABELS del mensaje nuevo puede tardar en reflejarlo, y
+     * sin esto la respuesta entraría a la Bandeja sin su etiqueta.
+     *
+     * @param  array<string, mixed>  $datos
+     */
+    private function heredarEtiquetasDelHilo(array &$datos): void
+    {
+        $threadId = $datos['thread_id'] ?? null;
+
+        if (! $threadId) {
+            return;
+        }
+
+        $personalizadas = InboxMensaje::where('thread_id', $threadId)
+            ->whereNotNull('etiquetas')
+            ->get(['etiquetas'])
+            ->flatMap(fn (InboxMensaje $m): array => $m->etiquetas ?? [])
+            ->reject(fn ($e): bool => ! is_string($e) || InboxMensaje::esEtiquetaSistema($e))
+            ->unique()
+            ->values();
+
+        if ($personalizadas->isEmpty()) {
+            return;
+        }
+
+        $datos['etiquetas'] = array_values(array_unique(array_merge($datos['etiquetas'] ?? [], $personalizadas->all())));
+    }
+
     private function resolverHilo(array $datos): ?string
     {
         $candidatos = $this->idsReferencias($datos);

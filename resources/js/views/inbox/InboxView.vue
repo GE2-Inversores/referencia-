@@ -98,23 +98,7 @@
         <section class="inbx-reader">
           <p v-if="!seleccionado" class="inbx-vacio">Selecciona un correo para leerlo.</p>
           <template v-else>
-            <div v-if="hilo.length > 1" class="inbx-hilos">
-              <p class="inbx-hilos-tit">
-                <component :is="MessagesIcon" class="w-3.5 h-3.5" />
-                Conversación · {{ hilo.length }} mensajes
-              </p>
-              <button
-                v-for="h in hilo" :key="h.id"
-                type="button"
-                class="inbx-hilo-item"
-                :class="{ 'inbx-hilo-on': seleccionado.id === h.id, 'inbx-hilo-new': !h.leido }"
-                @click="abrir(h)"
-              >
-                <strong>{{ nombreRemitente(h.remitente) }}</strong>
-                <span class="inbx-hilo-snip">{{ h.snippet }}</span>
-                <time>{{ fechaCorta(h.recibido_en) }}</time>
-              </button>
-            </div>
+
             <header class="inbx-reader-head">
               <h2>{{ seleccionado.asunto }}</h2>
               <p><strong>De:</strong> {{ seleccionado.remitente }}</p>
@@ -235,15 +219,26 @@
               </button>
             </div>
             <p v-if="cargandoDetalle" class="inbx-vacio">Cargando mensaje…</p>
-            <iframe
-              v-else-if="seleccionado.cuerpo_html"
-              class="inbx-html"
-              sandbox=""
-              :srcdoc="seleccionado.cuerpo_html"
-              title="Contenido del correo"
-            ></iframe>
-            <pre v-else-if="seleccionado.cuerpo_texto" class="inbx-texto">{{ seleccionado.cuerpo_texto }}</pre>
-            <p v-else class="inbx-vacio">Este correo no tiene contenido legible.</p>
+            <div v-else class="inbx-conversacion">
+              <article v-for="correo in conversacion" :key="correo.clave" class="inbx-correo">
+                <button type="button" class="inbx-correo-cabecera" :aria-expanded="abiertos.includes(correo.clave)" @click="alternarCorreo(correo.clave)">
+                  <span class="inbx-correo-avatar">{{ nombreRemitente(correo.remitente).slice(0, 1).toUpperCase() }}</span>
+                  <span class="inbx-correo-resumen">
+                    <strong>{{ nombreRemitente(correo.remitente) }} <small v-if="correo.enviado">· Enviado</small></strong>
+                    <span>{{ abiertos.includes(correo.clave) ? `Para: ${correo.para || '—'}` : correo.snippet }}</span>
+                  </span>
+                  <time>{{ fechaLarga(correo.fecha) }}</time>
+                </button>
+                <div v-if="abiertos.includes(correo.clave)" class="inbx-correo-contenido">
+                  <iframe v-if="correo.html" class="inbx-correo-html" sandbox="" :srcdoc="correo.html" title="Contenido del mensaje"></iframe>
+                  <pre v-else class="inbx-correo-texto">{{ correo.texto || 'Sin contenido legible.' }}</pre>
+                  <div v-if="!correo.enviado" class="inbx-adjuntos">
+                    <a v-for="(a, i) in correo.adjuntos" :key="i" class="inbx-adjunto" :href="`/api/inbox/${correo.id}/adjunto/${i}`" target="_blank" rel="noopener">{{ a.nombre }}</a>
+                  </div>
+                  <button v-if="!correo.enviado" type="button" class="inbx-ans" @click="contestarMensaje(correo.id)">Contestar este mensaje</button>
+                </div>
+              </article>
+            </div>
           </template>
         </section>
 
@@ -772,6 +767,30 @@ interface GmailInfo {
 const mensajes = ref<InboxItem[]>([]);
 const seleccionado = ref<InboxItem | null>(null);
 const hilo = ref<InboxItem[]>([]);
+const respuestasHilo = ref<{ id: number; remitente: string; para: string; cuerpo_texto: string; created_at: string }[]>([]);
+const abiertos = ref<string[]>([]);
+const conversacion = computed(() => [
+  ...(hilo.value.length ? hilo.value : seleccionado.value ? [seleccionado.value] : []).map((m) => ({
+    clave: `recibido-${m.id}`, id: m.id, remitente: m.remitente, para: m.para,
+    fecha: m.recibido_en, snippet: m.snippet, texto: m.cuerpo_texto,
+    html: m.cuerpo_html, adjuntos: m.adjuntos, enviado: false,
+  })),
+  ...respuestasHilo.value.map((m) => ({
+    clave: `enviado-${m.id}`, id: m.id, remitente: m.remitente, para: m.para,
+    fecha: m.created_at, snippet: m.cuerpo_texto.slice(0, 160), texto: m.cuerpo_texto,
+    html: null, adjuntos: [], enviado: true,
+  })),
+].sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime()));
+
+function alternarCorreo(clave: string): void {
+  abiertos.value = abiertos.value.includes(clave) ? abiertos.value.filter((x) => x !== clave) : [...abiertos.value, clave];
+}
+
+async function contestarMensaje(id: number): Promise<void> {
+  const { data } = await http.get(`/api/inbox/${id}`);
+  seleccionado.value = data.data;
+  abrirContestar();
+}
 
 // Un hilo se marca como no leído si cualquiera de sus mensajes lo está —
 // la fila de la lista muestra el último, pero puede haber otro sin leer.
@@ -936,6 +955,7 @@ async function confirmarRespuesta(): Promise<void> {
       item.carpeta = data.data.carpeta;
     }
     carpetas.value = data.carpetas ?? carpetas.value;
+    await cargarHilo(seleccionado.value.id);
     notify.success(data.message || 'Respuesta enviada.');
     panelContestar.value = false;
     // El hilo salió a «Contestados»: recargar para que desaparezca de la Entrada.
@@ -1519,8 +1539,11 @@ async function cargarHilo(id: number): Promise<void> {
   try {
     const { data } = await http.get(`/api/inbox/${id}/hilo`);
     hilo.value = data.data ?? [];
+    respuestasHilo.value = data.respuestas ?? [];
+    abiertos.value = conversacion.value.length ? [conversacion.value[conversacion.value.length - 1].clave] : [];
   } catch {
     hilo.value = [];
+    respuestasHilo.value = [];
   }
 }
 
@@ -1534,11 +1557,7 @@ async function abrir(m: InboxItem): Promise<void> {
   try {
     const { data } = await http.get(`/api/inbox/${m.id}`);
     seleccionado.value = data.data;
-    if ((m.hilo_total ?? 0) > 1) {
-      void cargarHilo(m.id);
-    } else if (!hilo.value.some((x) => x.id === m.id)) {
-      hilo.value = [];
-    }
+    await cargarHilo(m.id);
     if (!m.leido) {
       m.leido = true;
       const hermano = hilo.value.find((x) => x.id === m.id);
@@ -1660,6 +1679,21 @@ onUnmounted(() => window.clearInterval(temporizador));
 </script>
 
 <style scoped>
+.inbx-conversacion { flex: 1; min-height: 0; overflow-y: auto; }
+.inbx-correo { border-bottom: 1px solid #e2e8f0; }
+.inbx-correo-cabecera { display: flex; align-items: center; gap: 14px; width: 100%; padding: 20px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.inbx-correo-cabecera:hover { background: #f8fafc; }
+.inbx-correo-avatar { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; border-radius: 50%; background: #e0eaff; color: #2456a6; font-weight: 700; }
+.inbx-correo-resumen { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.inbx-correo-resumen > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #64748b; }
+.inbx-correo-resumen strong { font-size: 13px; }
+.inbx-correo-resumen small, .inbx-correo-cabecera time { color: #64748b; font-size: 11px; }
+.inbx-correo-contenido { padding: 0 20px 20px 74px; }
+.inbx-correo-html { width: 100%; height: 420px; border: 0; background: white; }
+.inbx-correo-texto { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; line-height: 1.7; margin-bottom: 16px; }
+.dark .inbx-correo { border-color: #334155; }
+.dark .inbx-correo-cabecera:hover { background: #1e293b; }
+@media (max-width: 640px) { .inbx-correo-cabecera { padding: 14px; gap: 8px; flex-wrap: wrap; } .inbx-correo-contenido { padding: 0 14px 14px; } }
 .inbx-page { background: linear-gradient(165deg, #eaf1fb 0%, #f4f7fd 45%, #eef2fa 100%); }
 .dark .inbx-page { background: transparent; }
 .inbx-wrap { display: flex; height: 100%; min-height: 0; flex-direction: column; }

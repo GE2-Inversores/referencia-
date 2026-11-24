@@ -96,16 +96,19 @@ class InboxController extends Controller
         // soporta referencias externas dentro de una tabla derivada.
         $filas = $pagina->getCollection();
         $companeros = InboxMensaje::query()
-            ->select(['id', 'thread_id', 'remitente'])
+            ->select(['id', 'thread_id', 'remitente', 'etiquetas'])
             ->where(fn ($q) => $q
                 ->whereIn('thread_id', $filas->pluck('thread_id')->filter()->unique()->values())
                 ->orWhereIn('id', $filas->whereNull('thread_id')->pluck('id')))
             ->get()
-            ->groupBy(fn (InboxMensaje $m): string => $m->thread_id ?: "solo-{$m->id}")
-            ->map(fn ($grupo) => $grupo->pluck('remitente')->filter()->unique()->take(10)->implode(' || '));
+            ->groupBy(fn (InboxMensaje $m): string => $m->thread_id ?: "solo-{$m->id}");
 
         $filas->each(function (InboxMensaje $m) use ($companeros): void {
-            $m->hilo_remitentes = $companeros[$m->thread_id ?: "solo-{$m->id}"] ?? $m->remitente;
+            $grupo = $companeros->get($m->thread_id ?: "solo-{$m->id}", collect());
+            $m->hilo_remitentes = $grupo->pluck('remitente')->filter()->unique()->take(10)->implode(' || ') ?: $m->remitente;
+            $personalizadas = $grupo->flatMap(fn (InboxMensaje $correo): array => $correo->etiquetas ?? [])
+                ->filter(fn ($etiqueta): bool => is_string($etiqueta) && ! InboxMensaje::esEtiquetaSistema($etiqueta));
+            $m->etiquetas = collect($m->etiquetas ?? [])->merge($personalizadas)->unique()->values()->all();
         });
 
         return response()->json([
@@ -273,20 +276,26 @@ class InboxController extends Controller
      */
     public function hilo(InboxMensaje $mensaje): JsonResponse
     {
-        if (! $mensaje->thread_id) {
-            return response()->json(['data' => []]);
-        }
-
-        $mensajes = $mensaje->hilo()
+        $mensajes = InboxMensaje::query()
+            ->when(filled($mensaje->thread_id), fn ($q) => $q->where('thread_id', $mensaje->thread_id), fn ($q) => $q->whereKey($mensaje->id))
             ->select([
-                'id', 'remitente', 'remitente_email', 'asunto', 'snippet',
-                'tiene_adjuntos', 'recibido_en', 'leido', 'gestion', 'carpeta',
+                'id', 'remitente', 'remitente_email', 'para', 'asunto', 'snippet',
+                'tiene_adjuntos', 'adjuntos', 'cuerpo_html', 'cuerpo_texto', 'recibido_en', 'leido', 'gestion', 'carpeta',
             ])
             ->with(['solicitud:id,inbox_mensaje_id,estado,nombre_quien_responde,created_at'])
             ->orderBy('recibido_en')
             ->get();
 
-        return response()->json(['data' => $mensajes]);
+        $respuestas = DB::table('inbox_respuestas')
+            ->whereIn('inbox_mensaje_id', $mensajes->pluck('id'))
+            ->orderBy('created_at')
+            ->orderBy('id')
+            ->get()
+            ->each(function (object $respuesta): void {
+                $respuesta->created_at = Carbon::parse($respuesta->created_at)->toIso8601String();
+            });
+
+        return response()->json(['data' => $mensajes, 'respuestas' => $respuestas]);
     }
 
     /**
@@ -690,6 +699,16 @@ class InboxController extends Controller
         } catch (Throwable) {
             return response()->json(['message' => 'No se pudo enviar la respuesta. Intente de nuevo en unos minutos.'], 503);
         }
+
+        DB::table('inbox_respuestas')->insert([
+            'inbox_mensaje_id' => $mensaje->id,
+            'remitente' => $quienResponde ?: 'Referencia',
+            'para' => $mensaje->remitente_email,
+            'cc' => json_encode($copias),
+            'cuerpo_texto' => $validated['cuerpo'],
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
 
         $mensaje->update([
             'contestado_at' => now(),
