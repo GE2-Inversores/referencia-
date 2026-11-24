@@ -211,9 +211,9 @@
       </div>
 
 
-      <!-- ── Cuatro desgloses ── -->
-      <div class="inf-grid inf-grid-4">
-        <section v-for="col in cuatroColumnas" :key="col.titulo" class="inf-panel" :class="col.tema">
+      <!-- ── Desgloses ── -->
+      <div class="inf-grid inf-grid-5">
+        <section v-for="col in desgloses" :key="col.titulo" class="inf-panel" :class="col.tema">
           <header class="inf-head-panel">
             <span class="inf-panel-icon" :class="col.iconoClase"><component :is="col.icono" class="w-3.5 h-3.5" /></span>
             <h2>{{ col.titulo }}</h2>
@@ -467,8 +467,15 @@ function nombreCorto(nombre: string): string {
   return nombre;
 }
 
-const cuatroColumnas = computed(() => informe.value
+const desgloses = computed(() => informe.value
   ? [
+      {
+        titulo: 'Comentados por asegurador',
+        tema: 'inf-t-purple',
+        icono: UsersIcon, iconoClase: '', barClass: 'inf-bar-purple', pillClass: 'inf-cat-pill-purple',
+        // Todos los comentados por EPS del período: aceptados, negados y pendientes.
+        filas: informe.value.por_eps.map((f) => ({ nombre: nombreCorto(f.nombre), total: f.total, pct: pctDe(f.total, informe.value!.resumen.total) })),
+      },
       {
         titulo: 'Aceptadas por asegurador',
         tema: 'inf-t-green',
@@ -790,9 +797,10 @@ onMounted(() => { void cargarCorreos(); void cargar(); });
 .inf-grid > .inf-panel { margin-bottom: 0; }
 .inf-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .inf-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-@media (max-width: 1200px) { .inf-hero { grid-template-columns: repeat(2, minmax(0,1fr)); } .inf-hero > .inf-panel:first-child { grid-column: 1 / -1; } .inf-grid-4 { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+.inf-grid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 1200px) { .inf-hero { grid-template-columns: repeat(2, minmax(0,1fr)); } .inf-hero > .inf-panel:first-child { grid-column: 1 / -1; } .inf-grid-4, .inf-grid-5 { grid-template-columns: repeat(2, minmax(0,1fr)); } }
 @media (max-width: 1000px) { .inf-grid { grid-template-columns: 1fr; } }
-@media (max-width: 640px) { .inf-hero, .inf-grid-4 { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .inf-hero, .inf-grid-4, .inf-grid-5 { grid-template-columns: 1fr; } }
 
 /* ── Fila doble: barras de ingresos + dona de origen ── */
 .inf-duo { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 6px; margin-bottom: 6px; align-items: stretch; }

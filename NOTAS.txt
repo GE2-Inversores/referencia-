@@ -93,3 +93,5 @@ NOTAS
 3. adjuntar archisvos a las respuestas
 4. ver los archisvos adjuntos en el correo de la vista previa 
 5. 
+
+1. generar informe de cunatos pacientees comentados se generaron por eps independientmenete sea negado o aceptado 
