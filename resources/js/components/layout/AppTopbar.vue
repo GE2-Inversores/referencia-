@@ -70,6 +70,7 @@
       <!-- Acciones -->
       <div class="flex items-center gap-2.5 shrink-0">
         <div class="topbar-actions-group">
+          <TiempoEspera />
           <NotificationCenter :light="false" scope="interno" />
           <span class="topbar-actions-sep"></span>
           <button class="topbar-action-btn" :title="layout.isDarkMode ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'" @click="layout.toggleDarkMode">
@@ -152,6 +153,7 @@ import { useLayoutStore } from '@/stores/layout';
 import { useAuthStore } from '@/stores/auth';
 import { usePermission } from '@/composables/usePermission';
 import NotificationCenter from './NotificationCenter.vue';
+import TiempoEspera from './TiempoEspera.vue';
 import * as icons from '@lucide/vue';
 import {
   ChevronDown as ChevronDownIcon,

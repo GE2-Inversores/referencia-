@@ -1272,11 +1272,38 @@ class GmailService
         try {
             if ($this->esImap()) {
                 $sistema = ['\Noselect', '\All', '\Trash', '\Sent', '\Drafts', '\Junk', '\Spam', '\Important', '\Archive', '\Flagged', '\Marked', '\Unmarked'];
+                $buzon = $this->imapMailbox();
+                $carpetas = $buzon->folders()->get();
 
-                return $this->imapMailbox()->folders()->get()
+                $porCarpeta = $carpetas
                     ->filter(fn (FolderInterface $c): bool => $c->path() !== '' && strtoupper($c->path()) !== 'INBOX' && array_intersect($c->flags(), $sistema) === [])
-                    ->map(fn (FolderInterface $c): string => ImapStr::fromImapUtf7($c->path()))
-                    ->filter()
+                    ->map(fn (FolderInterface $c): string => ImapStr::fromImapUtf7($c->path()));
+
+                // Gmail solo expone las etiquetas como carpetas cuando el
+                // usuario las marca "Mostrar en IMAP": el atributo
+                // X-GM-LABELS de los mensajes las trae siempre, así que se
+                // exploran los recientes de Entrada y de Todos los correos.
+                $porMensaje = collect([$buzon->inbox()])
+                    ->merge($carpetas->filter(fn (FolderInterface $c): bool => in_array('\All', $c->flags(), true)))
+                    ->flatMap(function ($carpeta) {
+                        $hasta = (int) ($carpeta->status()['UIDNEXT'] ?? 0);
+
+                        if ($hasta <= 1) {
+                            return collect();
+                        }
+
+                        $carpeta->select();
+
+                        return $carpeta->mailbox()->connection()
+                            ->fetch('X-GM-LABELS', max(1, $hasta - 400), $hasta - 1)
+                            ->map(fn ($r) => $r->tokenAt(3)?->lookup('X-GM-LABELS')?->values())
+                            ->filter()
+                            ->flatten();
+                    });
+
+                return $porCarpeta->merge($porMensaje)
+                    ->filter(fn ($e): bool => is_string($e) && ! InboxMensaje::esEtiquetaSistema($e))
+                    ->unique()
                     ->values()
                     ->all();
             }

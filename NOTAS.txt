@@ -95,3 +95,11 @@ NOTAS
 5. 
 
 1. generar informe de cunatos pacientees comentados se generaron por eps independientmenete sea negado o aceptado 
+
+
+24/11/2026
+1. etiquetas que se visualizen en la bandeja de entrada 
+2. en contestar poner eps/asegurador, motivo de negacion objeto 
+3. hilos del correo. 
+4. pacientes aceptados, crear alerta de que se vencio el tiempo de espera 2 horas antes 
+5. 

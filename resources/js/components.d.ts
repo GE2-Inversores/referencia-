@@ -76,6 +76,8 @@ declare module 'vue' {
     TabsContent: typeof import('./components/ui/tabs/TabsContent.vue')['default']
     TabsList: typeof import('./components/ui/tabs/TabsList.vue')['default']
     TabsTrigger: typeof import('./components/ui/tabs/TabsTrigger.vue')['default']
+    TiempoEspera: typeof import('./components/layout/TiempoEspera.vue')['default']
+    VersionChecker: typeof import('./components/VersionChecker.vue')['default']
   }
   export interface GlobalDirectives {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

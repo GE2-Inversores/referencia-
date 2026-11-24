@@ -27,6 +27,26 @@ Route::get('/login', fn () => view('welcome'))->name('login');
 
 Route::prefix('api')->name('api.')->group(function (): void {
 
+    // Versión del despliegue (pública): el VersionChecker del SPA la consulta
+    // cada 60 s para detectar builds nuevos y ofrecer recargar. Se lee el
+    // archivo en cada request — no cachear.
+    Route::get('version', function () {
+        $archivo = base_path('version.json');
+        $version = '1.0.0';
+
+        if (is_file($archivo)) {
+            $datos = json_decode((string) file_get_contents($archivo), true);
+            if (json_last_error() === JSON_ERROR_NONE && isset($datos['version'])) {
+                $version = $datos['version'];
+            }
+        }
+
+        return response()->json([
+            'version' => $version,
+            'timestamp' => is_file($archivo) ? filemtime($archivo) : time(),
+        ]);
+    })->name('version');
+
     // ── Login externo para clínicas (sin Sanctum) ────────────────────────────
     Route::prefix('externo')->name('externo.')->group(function () {
         Route::post('buscar-clinica', [LoginExternoController::class, 'buscarClinica'])->name('buscar-clinica');
@@ -142,6 +162,7 @@ Route::prefix('api')->name('api.')->group(function (): void {
         Route::get('solicitudes-referencia/historico', [SolicitudReferenciaController::class, 'historico'])->name('solicitudes-referencia.historico')->middleware('permission:historico.view');
         Route::get('solicitudes-referencia/historico/ids', [SolicitudReferenciaController::class, 'historicoIds'])->name('solicitudes-referencia.historico.ids')->middleware('permission:historico.view');
         // El detalle también lo abre el dashboard (modal) y el historial.
+        Route::get('solicitudes-referencia/en-espera-tiempo', [SolicitudReferenciaController::class, 'enEsperaTiempo'])->name('solicitudes-referencia.en-espera-tiempo')->middleware('permission:solicitudes.view|historico.view|dashboard.view');
         Route::get('solicitudes-referencia/{solicitud}', [SolicitudReferenciaController::class, 'show'])->name('solicitudes-referencia.show')->middleware('permission:solicitudes.view|historico.view|dashboard.view');
         Route::post('solicitudes-referencia/{solicitud}/aceptar', [SolicitudReferenciaController::class, 'aceptar'])->name('solicitudes-referencia.aceptar')->middleware('permission:solicitudes.view|historico.view');
         Route::post('solicitudes-referencia/{solicitud}/negar', [SolicitudReferenciaController::class, 'negar'])->name('solicitudes-referencia.negar')->middleware('permission:solicitudes.view|historico.view');

@@ -9,12 +9,14 @@
         </transition>
       </router-view>
     </main>
+    <VersionChecker />
   </div>
 </template>
 
 <script setup lang="ts">
 import { useLayoutStore } from '@/stores/layout';
 import AppTopbar from './AppTopbar.vue';
+import VersionChecker from '@/components/VersionChecker.vue';
 
 const layout = useLayoutStore();
 </script>

@@ -297,6 +297,74 @@ class InboxTest extends TestCase
         $this->assertNull($correo->fresh()->carpeta);
     }
 
+    public function test_responder_con_eps_registra_solicitud_negada_para_el_informe(): void
+    {
+        $correo = $this->correo(['remitente_email' => 'clinica@example.com']);
+
+        $this->actingAs($this->staff())
+            ->postJson("/api/inbox/{$correo->id}/responder", [
+                'cuerpo' => 'El paciente es de nuestra red, se remite internamente.',
+                'eps' => 'EMSSANAR',
+                'motivo' => 'Paciente de la red propia',
+            ])
+            ->assertOk();
+
+        $correo->refresh();
+        $solicitud = SolicitudReferencia::where('inbox_mensaje_id', $correo->id)->sole();
+
+        $this->assertSame('EMSSANAR', $solicitud->eps);
+        $this->assertSame('negado', $solicitud->estado);
+        $this->assertSame('Paciente de la red propia', $solicitud->motivo_negacion);
+        $this->assertSame('poblacion_objeto', $solicitud->grupo_negacion);
+        $this->assertSame('negada', $correo->gestion);
+        $this->assertSame('Contestados', $correo->carpeta);
+    }
+
+    public function test_responder_sin_eps_no_crea_solicitud(): void
+    {
+        $correo = $this->correo();
+
+        $this->actingAs($this->staff())
+            ->postJson("/api/inbox/{$correo->id}/responder", ['cuerpo' => 'Recibido, lo revisamos.'])
+            ->assertOk();
+
+        $this->assertSame(0, SolicitudReferencia::where('inbox_mensaje_id', $correo->id)->count());
+        $this->assertNull($correo->fresh()->gestion);
+    }
+
+    public function test_responder_con_eps_no_duplica_la_solicitud_existente(): void
+    {
+        $correo = $this->correo();
+        $solicitud = SolicitudReferencia::create([
+            'inbox_mensaje_id' => $correo->id,
+            'origen' => 'correo',
+            'fecha' => now()->toDateString(),
+            'hora' => now()->format('H:i'),
+            'primer_nombre' => 'Ana',
+            'primer_apellido' => 'Pérez',
+            'genero' => 'F',
+            'edad' => 30,
+            'tipo_documento' => 'CC',
+            'numero_documento' => '12345',
+            'eps' => 'SURA',
+            'municipio_capita' => 'Bucaramanga',
+            'especialidad_requerida' => 'Neurología',
+            'servicio_ubicacion_actual' => 'Urgencias',
+            'resumen_historia_clinica' => 'Caso',
+            'estado' => 'pendiente',
+        ]);
+
+        $this->actingAs($this->staff())
+            ->postJson("/api/inbox/{$correo->id}/responder", [
+                'cuerpo' => 'Recibido.',
+                'eps' => 'EMSSANAR',
+            ])
+            ->assertOk();
+
+        $this->assertSame(1, SolicitudReferencia::where('inbox_mensaje_id', $correo->id)->count());
+        $this->assertSame('SURA', $solicitud->fresh()->eps);
+    }
+
     public function test_abrir_un_correo_lo_marca_como_leido(): void
     {
         $correo = $this->correo();

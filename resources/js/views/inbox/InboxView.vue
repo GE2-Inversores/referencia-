@@ -57,13 +57,14 @@
           >
             <span class="inbx-mini">{{ nombreRemitente(m.remitente).charAt(0).toUpperCase() }}</span>
             <span class="inbx-item-top">
-              <strong class="inbx-from">{{ nombreRemitente(m.remitente) }}</strong>
+              <strong class="inbx-from">{{ remitentesDe(m) }}</strong>
+              <span v-if="(m.hilo_total ?? 1) > 1" class="inbx-hilo-num" :title="`${m.hilo_total} mensajes en esta conversación`">{{ m.hilo_total }}</span>
               <time>{{ fechaCorta(m.recibido_en) }}</time>
             </span>
-            <span class="inbx-subject">{{ m.asunto }}</span>
-            <span v-if="etiquetasDe(m).length" class="inbx-item-etq">
+            <span class="inbx-subject">
               <span v-for="e in etiquetasDe(m).slice(0, 2)" :key="e" class="inbx-chip" :style="{ '--chip': colorEtiqueta(e) }">{{ e }}</span>
               <span v-if="etiquetasDe(m).length > 2" class="inbx-chip-mas" :title="etiquetasDe(m).join(', ')">+{{ etiquetasDe(m).length - 2 }}</span>
+              {{ m.asunto }}
             </span>
             <span class="inbx-snippet">{{ m.snippet }}</span>
             <span class="inbx-item-meta">
@@ -83,9 +84,6 @@
               </span>
               <span v-if="m.contestado_at" class="inbx-tag-cont" :title="`Contestado por ${m.contestado_por || 'el equipo'}`">
                 <component :is="ReplyIcon" class="w-3 h-3" /> Contestado
-              </span>
-              <span v-if="(m.hilo_total ?? 1) > 1" class="inbx-hilo" :title="`${m.hilo_total} mensajes en esta conversación`">
-                <component :is="MessagesIcon" class="w-3 h-3" /> {{ m.hilo_total }}
               </span>
               <component v-if="m.tiene_adjuntos" :is="ClipIcon" class="w-3 h-3" />
               <i v-if="sinLeer(m)" class="inbx-dot" />
@@ -634,6 +632,22 @@
               <el-select v-model="formContestar.cc" multiple filterable allow-create default-first-option :reserve-keyword="false" collapse-tags :max-collapse-tags="2" placeholder="Correos adicionales que reciban la respuesta (opcional)" class="w-full" />
             </div>
 
+            <div class="inbx-negar-grid2">
+              <div>
+                <label class="inbx-negar-label">EPS / Aseguradora</label>
+                <el-select v-model="formContestar.eps" placeholder="Seleccione la EPS (opcional)" filterable clearable class="w-full" popper-class="negar-motivo-popper">
+                  <el-option v-for="e in EPS_LIST" :key="e" :label="e" :value="e" />
+                </el-select>
+              </div>
+              <div>
+                <label class="inbx-negar-label">Motivo de negación — población objeto</label>
+                <el-select v-model="formContestar.motivo" placeholder="Seleccione el motivo (opcional)" filterable clearable class="w-full" popper-class="negar-motivo-popper">
+                  <el-option v-for="m in MOTIVOS_NEGACION_POBLACION" :key="m" :label="m" :value="m" />
+                </el-select>
+              </div>
+            </div>
+            <p v-if="formContestar.eps || formContestar.motivo" class="inbx-negar-hint">La EPS y el motivo se incluyen al inicio de la respuesta y quedan registrados en el informe de comentados por asegurador.</p>
+
             <div>
               <label class="inbx-negar-label">Respuesta <span class="inbx-req">*</span></label>
               <el-input v-model="formContestar.cuerpo" type="textarea" :rows="7" placeholder="Escriba la respuesta que recibirá el remitente…" maxlength="4000" show-word-limit />
@@ -743,6 +757,7 @@ interface InboxItem {
   contestado_por?: string | null;
   contestado_detalle?: string | null;
   hilo_total?: number;
+  hilo_remitentes?: string;
   hilo_sin_leer?: number;
   solicitud?: { id: number; estado: string; nombre_quien_responde: string | null; created_at: string } | null;
 }
@@ -875,13 +890,13 @@ const reenviando = ref(false);
 
 const panelContestar = ref(false);
 const respondiendo = ref(false);
-const formContestar = ref<{ cuerpo: string; cc: string[] }>({ cuerpo: '', cc: [] });
+const formContestar = ref<{ cuerpo: string; cc: string[]; eps: string; motivo: string }>({ cuerpo: '', cc: [], eps: '', motivo: '' });
 
 function abrirContestar(): void {
   panelNegar.value = false;
   panelAceptar.value = false;
   panelReenviar.value = false;
-  formContestar.value = { cuerpo: '', cc: [] };
+  formContestar.value = { cuerpo: '', cc: [], eps: '', motivo: '' };
   panelContestar.value = true;
 }
 
@@ -895,9 +910,19 @@ async function confirmarRespuesta(): Promise<void> {
     return;
   }
   const cc = formContestar.value.cc.filter((c) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c));
+  const encabezado = [
+    formContestar.value.eps ? `EPS / Aseguradora: ${formContestar.value.eps}` : '',
+    formContestar.value.motivo ? `Motivo de negación: ${formContestar.value.motivo}` : '',
+  ].filter(Boolean).join('\n');
+  const cuerpoFinal = encabezado ? `${encabezado}\n\n${cuerpo}` : cuerpo;
   respondiendo.value = true;
   try {
-    const { data } = await http.post(`/api/inbox/${seleccionado.value.id}/responder`, { cuerpo, cc });
+    const { data } = await http.post(`/api/inbox/${seleccionado.value.id}/responder`, {
+      cuerpo: cuerpoFinal,
+      cc,
+      eps: formContestar.value.eps || null,
+      motivo: formContestar.value.motivo || null,
+    });
     Object.assign(seleccionado.value, {
       contestado_at: data.data.contestado_at,
       contestado_por: data.data.contestado_por,
@@ -1549,6 +1574,19 @@ function nombreRemitente(remitente: string | null): string {
   return m ? m[1].trim() : remitente;
 }
 
+// Como Gmail: los participantes del hilo separados por comas
+// ("Clínica Norte, Contrarreferencia") en vez del último solo.
+function remitentesDe(m: InboxItem): string {
+  const lista = (m.hilo_remitentes ?? '')
+    .split(' || ')
+    .map((r) => nombreRemitente(r))
+    .filter(Boolean);
+
+  if (lista.length <= 1) return nombreRemitente(m.remitente);
+
+  return lista.slice(0, 3).join(', ') + (lista.length > 3 ? ` +${lista.length - 3}` : '');
+}
+
 function fechaCorta(iso: string): string {
   const d = new Date(iso);
   const hoy = new Date();
@@ -1693,7 +1731,8 @@ onUnmounted(() => window.clearInterval(temporizador));
 .dark .inbx-item { border-color: #263352; background: #161b28; }
 .dark .inbx-item-new { background: #182238; }
 .dark .inbx-item-on { border-color: #4f46e5; }
-.inbx-item-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.inbx-item-top { display: flex; align-items: center; gap: 6px; }
+.inbx-item-top time { margin-left: auto; }
 .inbx-from { overflow: hidden; color: #0d2d5e; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .inbx-item-new .inbx-from { font-weight: 800; }
 .dark .inbx-from { color: #dbe7fb; }
@@ -1706,6 +1745,11 @@ onUnmounted(() => window.clearInterval(temporizador));
 .inbx-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #2563eb; }
 .inbx-hilo { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; white-space: nowrap; color: #4f46e5; background: #eef2ff; border: 1px solid #c7d2fe; }
 .inbx-item-etq { display: flex; flex-wrap: wrap; gap: 4px; }
+.inbx-hilo-num { flex-shrink: 0; color: #334155; font-size: 11px; font-weight: 800; }
+.dark .inbx-hilo-num { color: #cbd5e1; }
+.inbx-item-top .inbx-chip { max-width: 110px; flex-shrink: 0; }
+.inbx-subject .inbx-chip { margin-right: 4px; vertical-align: 1px; }
+.inbx-item-top .inbx-chip-mas { flex-shrink: 0; font-size: 9.5px; }
 .inbx-etiquetas { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
 .inbx-chip { display: inline-flex; align-items: center; max-width: 180px; overflow: hidden; padding: 1px 8px; border-radius: 4px; background: var(--chip, #64748b); color: #fff; font-size: 9.5px; font-weight: 800; letter-spacing: .3px; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
 .inbx-chip-mas { align-self: center; color: #94a3b8; font-size: 10px; font-weight: 700; }
@@ -1975,6 +2019,8 @@ onUnmounted(() => window.clearInterval(temporizador));
 .inbx-aceptar-icon { background: linear-gradient(135deg, #22c55e, #16a34a); box-shadow: 0 6px 14px rgba(22,163,74,.3); }
 .inbx-aceptar-confirm { background: linear-gradient(135deg, #22c55e, #16a34a); box-shadow: 0 4px 12px rgba(22,163,74,.3); }
 .inbx-negar-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; }
+.inbx-negar-hint { margin: -2px 0 0; color: #64748b; font-size: 10px; font-weight: 600; }
+.dark .inbx-negar-hint { color: #93a5c0; }
 
 .inbx-form-seccion { margin: 6px 0 -2px; padding-bottom: 5px; border-bottom: 1.5px solid #e3ecfa; color: #16468e; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
 .dark .inbx-form-seccion { border-color: #22304a; color: #9dc1f7; }

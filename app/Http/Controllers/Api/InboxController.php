@@ -82,6 +82,7 @@ class InboxController extends Controller
                 'contestado_at', 'contestado_por',
             ])
             ->selectRaw("(SELECT COUNT(*) FROM inbox_mensajes h WHERE {$claveHilo('h')} = {$claveHilo('inbox_mensajes')}) AS hilo_total")
+            ->selectRaw("(SELECT GROUP_CONCAT(remitente, ' || ') FROM (SELECT DISTINCT remitente FROM inbox_mensajes h WHERE {$claveHilo('h')} = {$claveHilo('inbox_mensajes')}) hrem) AS hilo_remitentes")
             ->selectRaw("(SELECT COUNT(*) FROM inbox_mensajes h WHERE h.leido = 0 AND {$claveHilo('h')} = {$claveHilo('inbox_mensajes')}) AS hilo_sin_leer")
             ->whereIn('id', $grupos)
             ->with(['solicitud:id,inbox_mensaje_id,estado,nombre_quien_responde,created_at'])
@@ -641,6 +642,8 @@ class InboxController extends Controller
             'cuerpo' => ['required', 'string', 'max:4000'],
             'cc' => ['nullable', 'array', 'max:5'],
             'cc.*' => ['email', 'max:150'],
+            'eps' => ['nullable', 'string', 'max:120'],
+            'motivo' => ['nullable', 'string', 'max:250'],
         ]);
 
         $quienResponde = $this->nombreUsuario($request);
@@ -688,11 +691,87 @@ class InboxController extends Controller
             : $enEntrada->where('id', $mensaje->id);
         $enEntrada->update(['carpeta' => 'Contestados']);
 
+        // Remisiones que no se pueden negar formalmente (paciente de la red
+        // propia): al contestar con EPS quedan registradas como solicitud
+        // negada, así el informe de comentados por asegurador las cuenta.
+        if (filled($validated['eps'] ?? null)) {
+            $this->registrarContestadaConEps($mensaje, $validated, $quienResponde);
+        }
+
         return response()->json([
             'data' => $mensaje->fresh(),
             'carpetas' => $this->carpetas(),
             'message' => 'Respuesta enviada a '.$mensaje->remitente_email.'.',
         ]);
+    }
+
+    /**
+     * Registra como solicitud negada una remisión contestada con EPS cuando
+     * no se puede negar formalmente (paciente de la red propia). El correo
+     * no recoge datos del paciente, así que se guarda con datos mínimos y
+     * la traza en observaciones; lo importante es que quede amarrada a la
+     * aseguradora para el informe de comentados. Si el correo ya tiene
+     * solicitud, solo se completa la EPS faltante.
+     */
+    private function registrarContestadaConEps(InboxMensaje $mensaje, array $validated, ?string $quienResponde): void
+    {
+        DB::transaction(function () use ($mensaje, $validated, $quienResponde): void {
+            $solicitud = SolicitudReferencia::where('inbox_mensaje_id', $mensaje->id)->first();
+
+            if ($solicitud) {
+                if (! filled($solicitud->eps)) {
+                    $solicitud->update(['eps' => $validated['eps']]);
+                }
+
+                return;
+            }
+
+            $recibido = $mensaje->recibido_en ? $mensaje->recibido_en->copy() : now();
+
+            $solicitud = SolicitudReferencia::create([
+                'inbox_mensaje_id' => $mensaje->id,
+                'origen' => 'correo',
+                'fecha' => $recibido->toDateString(),
+                'hora' => $recibido->format('H:i'),
+                'primer_nombre' => 'SIN',
+                'primer_apellido' => 'DATOS',
+                'genero' => 'M',
+                'edad' => 0,
+                'tipo_documento' => 'S/D',
+                'numero_documento' => "S/D-{$mensaje->id}",
+                'eps' => $validated['eps'],
+                'municipio_capita' => 'Sin dato',
+                'especialidad_requerida' => 'Sin dato',
+                'servicio_ubicacion_actual' => 'Sin dato',
+                'institucion_remitente' => mb_substr($mensaje->remitente ?? $mensaje->remitente_email ?? 'Correo', 0, 150),
+                'correo_contacto' => mb_substr($mensaje->remitente_email ?? '', 0, 150),
+                'quien_remitente' => mb_substr($mensaje->remitente ?? 'Correo', 0, 200),
+                'resumen_historia_clinica' => 'Contestada por correo sin gestión formal.',
+                'via_contacto' => 'correo',
+                'estado' => 'negado',
+                'grupo_negacion' => 'poblacion_objeto',
+                'motivo_negacion' => $validated['motivo'] ?? null,
+                'hora_respuesta' => now()->format('H:i'),
+                'nombre_quien_responde' => $quienResponde ?: null,
+                'observaciones_respuesta' => "Contestada desde la Bandeja sin gestión formal: «{$mensaje->asunto}».",
+            ]);
+
+            SolicitudReferenciaEvento::create([
+                'solicitud_referencia_id' => $solicitud->id,
+                'tipo' => 'creada',
+                'titulo' => 'Solicitud registrada al contestar con EPS',
+                'descripcion' => "Contestada desde la Bandeja: «{$mensaje->asunto}» de {$mensaje->remitente_email}.",
+            ]);
+
+            $mensaje->update([
+                'gestion' => 'negada',
+                'gestion_por' => $quienResponde,
+                'gestion_at' => now(),
+                'gestion_detalle' => "Contestada con EPS: {$validated['eps']}"
+                    .(filled($validated['motivo'] ?? null) ? " · Motivo: {$validated['motivo']}" : '')
+                    ." · Solicitud #{$solicitud->id} registrada.",
+            ]);
+        });
     }
 
     /**

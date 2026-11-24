@@ -52,6 +52,34 @@ class SolicitudReferenciaController extends Controller
     private const ESTADOS_HISTORICO = ['completado', 'negado', 'cancelado'];
 
     /**
+     * Pacientes aceptados que aún no llegan (estado en_espera) con el
+     * momento exacto de la aceptación: alimenta el botón «Tiempo» del
+     * encabezado, ordenados del que más espera al que menos.
+     */
+    public function enEsperaTiempo(): JsonResponse
+    {
+        $solicitudes = SolicitudReferencia::query()
+            ->select(['id', 'primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido', 'tipo_documento', 'numero_documento', 'eps', 'especialidad_requerida', 'institucion_remitente', 'codigo_aceptacion', 'updated_at'])
+            ->where('estado', 'en_espera')
+            ->with(['eventos' => fn ($q) => $q->select('id', 'solicitud_referencia_id', 'tipo', 'created_at')->where('tipo', 'en_espera')->latest('id')])
+            ->get()
+            ->map(fn (SolicitudReferencia $s): array => [
+                'id' => $s->id,
+                'paciente' => trim(implode(' ', array_filter([$s->primer_nombre, $s->segundo_nombre, $s->primer_apellido, $s->segundo_apellido]))),
+                'documento' => trim("{$s->tipo_documento} {$s->numero_documento}"),
+                'eps' => $s->eps,
+                'especialidad' => $s->especialidad_requerida,
+                'clinica' => $s->institucion_remitente,
+                'codigo' => $s->codigo_aceptacion,
+                'aceptado_en' => ($s->eventos->first()?->created_at ?? $s->updated_at)?->toIso8601String(),
+            ])
+            ->sortBy('aceptado_en')
+            ->values();
+
+        return response()->json(['data' => $solicitudes]);
+    }
+
+    /**
      * Histórico de solicitudes ya resueltas (completadas, negadas o canceladas),
      * paginado y filtrado en el servidor: solo viaja la página pedida con los
      * campos de la tarjeta — el detalle completo se pide con show() al abrirla.
