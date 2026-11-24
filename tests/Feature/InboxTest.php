@@ -11,6 +11,7 @@ use App\Services\GmailService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Mail\Message;
+use Illuminate\Support\Facades\Cache;
 use Mockery\MockInterface;
 use Symfony\Component\Mime\Email;
 use Tests\TestCase;
@@ -427,6 +428,23 @@ class InboxTest extends TestCase
             ->getJson('/api/inbox/etiquetas-buzon')
             ->assertOk()
             ->assertJsonPath('data', ['PACIENTES NO RED', 'Población objeto']);
+    }
+
+    public function test_el_catalogo_cacheado_se_combina_con_las_etiquetas_locales_sin_conectar_a_imap(): void
+    {
+        $usuario = $this->staff();
+        Setting::set('gmail_modo', 'imap');
+        Setting::set('gmail_buzon', 'referencia@example.com');
+        Setting::set('gmail_password', 'credencial-de-prueba');
+        $this->correo(['etiquetas' => ['LOCAL']]);
+
+        $clave = 'inbox_etiquetas_buzon_'.hash('sha256', 'referencia@example.com|imap');
+        Cache::put($clave, ['REMOTA'], now()->addMinutes(5));
+
+        $this->actingAs($usuario)
+            ->getJson('/api/inbox/etiquetas-buzon')
+            ->assertOk()
+            ->assertJsonPath('data', ['LOCAL', 'REMOTA']);
     }
 
     public function test_responder_falla_si_el_correo_no_tiene_remitente(): void

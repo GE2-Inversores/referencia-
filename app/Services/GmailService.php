@@ -287,9 +287,9 @@ class GmailService
      * busca por su Message-ID en «Todos» y, si la fila es vieja y no lo
      * tiene, por remitente, asunto y fecha.
      */
-    private function encontrarRemotoImap(InboxMensaje $mensaje): ?ImapMessage
+    private function encontrarRemotoImap(InboxMensaje $mensaje, ?Mailbox $mailbox = null): ?ImapMessage
     {
-        $mailbox = $this->imapMailbox();
+        $mailbox ??= $this->imapMailbox();
 
         if (str_starts_with((string) $mensaje->gmail_id, 'imap-')) {
             $remoto = $mailbox->inbox()->messages()->find((int) str_replace('imap-', '', (string) $mensaje->gmail_id));
@@ -1327,6 +1327,16 @@ class GmailService
             return [];
         }
 
+        $clave = 'inbox_etiquetas_buzon_'.hash('sha256', $this->buzon().'|'.($this->esImap() ? 'imap' : 'api'));
+
+        return Cache::remember($clave, now()->addMinutes(5), fn (): ?array => $this->consultarEtiquetasDelBuzon()) ?? [];
+    }
+
+    /**
+     * @return array<int, string>|null
+     */
+    private function consultarEtiquetasDelBuzon(): ?array
+    {
         try {
             if ($this->esImap()) {
                 $sistema = ['\Noselect', '\All', '\Trash', '\Sent', '\Drafts', '\Junk', '\Spam', '\Important', '\Archive', '\Flagged', '\Marked', '\Unmarked'];
@@ -1373,7 +1383,7 @@ class GmailService
                 ->values()
                 ->all();
         } catch (Throwable) {
-            return [];
+            return null;
         }
     }
 
@@ -1409,7 +1419,7 @@ class GmailService
      * @param  array<int, string>  $deseadas  nombres de etiquetas visibles
      * @return array<int, string> etiquetas personalizadas que quedaron
      */
-    public function ponerEtiquetas(InboxMensaje $mensaje, array $deseadas): array
+    public function ponerEtiquetas(InboxMensaje $mensaje, array $deseadas, ?Mailbox $mailbox = null): array
     {
         $deseadas = array_values(array_unique(array_filter(
             array_map(fn ($e): string => trim((string) $e), $deseadas),
@@ -1429,7 +1439,7 @@ class GmailService
         }
 
         if ($this->esImap()) {
-            $this->ponerEtiquetasImap($mensaje, $agregar, $quitar);
+            $this->ponerEtiquetasImap($mensaje, $agregar, $quitar, $mailbox);
         } else {
             $this->ponerEtiquetasGoogle($mensaje, $agregar, $quitar);
         }
@@ -1456,9 +1466,10 @@ class GmailService
             : collect([$mensaje]);
 
         $finales = [];
+        $mailbox = $this->esImap() ? $this->imapMailbox() : null;
 
         foreach ($mensajes as $correo) {
-            $finales = $this->ponerEtiquetas($correo, $deseadas);
+            $finales = $this->ponerEtiquetas($correo, $deseadas, $mailbox);
         }
 
         return $finales;
@@ -1468,9 +1479,9 @@ class GmailService
      * @param  array<int, string>  $agregar
      * @param  array<int, string>  $quitar
      */
-    private function ponerEtiquetasImap(InboxMensaje $mensaje, array $agregar, array $quitar): void
+    private function ponerEtiquetasImap(InboxMensaje $mensaje, array $agregar, array $quitar, ?Mailbox $mailbox = null): void
     {
-        $remoto = $this->encontrarRemotoImap($mensaje);
+        $remoto = $this->encontrarRemotoImap($mensaje, $mailbox);
 
         if ($remoto === null) {
             throw new RuntimeException('El correo ya no está en el buzón.');
