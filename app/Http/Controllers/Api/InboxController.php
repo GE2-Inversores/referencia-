@@ -62,8 +62,10 @@ class InboxController extends Controller
         // Vista de hilos: una fila por conversación con el mensaje más
         // reciente del hilo dentro del filtro, el total de mensajes del hilo
         // y cuántos quedan sin leer (contados en toda la bandeja).
-        $claveHilo = function (string $tabla): string {
-            $solo = InboxMensaje::query()->getModel()->getConnection()->getDriverName() === 'sqlite'
+        $esSqlite = InboxMensaje::query()->getModel()->getConnection()->getDriverName() === 'sqlite';
+
+        $claveHilo = function (string $tabla) use ($esSqlite): string {
+            $solo = $esSqlite
                 ? "('solo-' || {$tabla}.id)"
                 : "CONCAT('solo-', {$tabla}.id)";
 
@@ -76,13 +78,12 @@ class InboxController extends Controller
 
         $consulta = InboxMensaje::query()
             ->select([
-                'id', 'gmail_id', 'remitente', 'remitente_email', 'para', 'asunto', 'snippet',
+                'id', 'gmail_id', 'thread_id', 'remitente', 'remitente_email', 'para', 'asunto', 'snippet',
                 'tiene_adjuntos', 'recibido_en', 'leido',
                 'gestion', 'gestion_por', 'gestion_at', 'gestion_detalle', 'carpeta', 'etiquetas',
                 'contestado_at', 'contestado_por',
             ])
             ->selectRaw("(SELECT COUNT(*) FROM inbox_mensajes h WHERE {$claveHilo('h')} = {$claveHilo('inbox_mensajes')}) AS hilo_total")
-            ->selectRaw("(SELECT GROUP_CONCAT(remitente, ' || ') FROM (SELECT DISTINCT remitente FROM inbox_mensajes h WHERE {$claveHilo('h')} = {$claveHilo('inbox_mensajes')}) hrem) AS hilo_remitentes")
             ->selectRaw("(SELECT COUNT(*) FROM inbox_mensajes h WHERE h.leido = 0 AND {$claveHilo('h')} = {$claveHilo('inbox_mensajes')}) AS hilo_sin_leer")
             ->whereIn('id', $grupos)
             ->with(['solicitud:id,inbox_mensaje_id,estado,nombre_quien_responde,created_at'])
@@ -90,8 +91,25 @@ class InboxController extends Controller
 
         $pagina = $consulta->paginate(30);
 
+        // Remitentes de cada hilo para la vista tipo Gmail ("Clínica A,
+        // Clínica B"). Se resuelven en PHP porque el MySQL del servidor no
+        // soporta referencias externas dentro de una tabla derivada.
+        $filas = $pagina->getCollection();
+        $companeros = InboxMensaje::query()
+            ->select(['id', 'thread_id', 'remitente'])
+            ->where(fn ($q) => $q
+                ->whereIn('thread_id', $filas->pluck('thread_id')->filter()->unique()->values())
+                ->orWhereIn('id', $filas->whereNull('thread_id')->pluck('id')))
+            ->get()
+            ->groupBy(fn (InboxMensaje $m): string => $m->thread_id ?: "solo-{$m->id}")
+            ->map(fn ($grupo) => $grupo->pluck('remitente')->filter()->unique()->take(10)->implode(' || '));
+
+        $filas->each(function (InboxMensaje $m) use ($companeros): void {
+            $m->hilo_remitentes = $companeros[$m->thread_id ?: "solo-{$m->id}"] ?? $m->remitente;
+        });
+
         return response()->json([
-            'data' => $pagina->items(),
+            'data' => $filas,
             'meta' => [
                 'total' => $pagina->total(),
                 'pagina' => $pagina->currentPage(),
