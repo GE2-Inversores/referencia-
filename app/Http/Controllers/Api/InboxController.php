@@ -265,6 +265,7 @@ class InboxController extends Controller
             $mensaje->refresh();
         }
 
+        $gmail->reconciliarHilo($mensaje);
         $mensaje->load(['solicitud:id,inbox_mensaje_id,estado,nombre_quien_responde,created_at']);
 
         return response()->json(['data' => $mensaje]);

@@ -1123,7 +1123,7 @@ class GmailService
         $datos['etiquetas'] = array_values(array_unique(array_merge($datos['etiquetas'] ?? [], $personalizadas->all())));
     }
 
-    private function resolverHilo(array $datos): ?string
+    private function resolverHilo(array $datos, bool $nuevo = true): ?string
     {
         $candidatos = $this->idsReferencias($datos);
 
@@ -1141,7 +1141,7 @@ class GmailService
             }
         }
 
-        return isset($datos['message_id']) ? mb_substr((string) $datos['message_id'], 0, 255) : null;
+        return $nuevo && isset($datos['message_id']) ? mb_substr((string) $datos['message_id'], 0, 255) : null;
     }
 
     /**
@@ -1152,13 +1152,39 @@ class GmailService
      * @param  array<string, mixed>  $datos
      * @return array<int, string>
      */
+    public function reconciliarHilo(InboxMensaje $mensaje): void
+    {
+        if (! str_starts_with((string) $mensaje->gmail_id, 'imap-')) {
+            return;
+        }
+
+        $datos = $mensaje->getAttributes();
+        $hilo = $this->resolverHilo($datos, false);
+
+        if ($hilo && $hilo !== $mensaje->thread_id) {
+            $consulta = InboxMensaje::query();
+            filled($mensaje->thread_id)
+                ? $consulta->where('thread_id', $mensaje->thread_id)
+                : $consulta->whereKey($mensaje->id);
+            $consulta->update(['thread_id' => $hilo]);
+            $mensaje->refresh();
+        }
+
+        $datos = ['thread_id' => $mensaje->thread_id, 'etiquetas' => $mensaje->etiquetas ?? []];
+        $this->heredarEtiquetasDelHilo($datos);
+        $mensaje->update(['etiquetas' => $datos['etiquetas']]);
+    }
+
     private function idsReferencias(array $datos): array
     {
         $ids = [];
 
         foreach (['in_reply_to', 'referencias'] as $campo) {
-            if (preg_match_all('/<[^<>\s]+>/', (string) ($datos[$campo] ?? ''), $coincidencias)) {
-                $ids = array_merge($ids, $coincidencias[0], array_map(fn (string $id): string => trim($id, '<>'), $coincidencias[0]));
+            if (preg_match_all('/[^<>\s,;]+@[^<>\s,;]+/', (string) ($datos[$campo] ?? ''), $coincidencias)) {
+                foreach ($coincidencias[0] as $id) {
+                    $ids[] = $id;
+                    $ids[] = "<{$id}>";
+                }
             }
         }
 

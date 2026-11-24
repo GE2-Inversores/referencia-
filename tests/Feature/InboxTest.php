@@ -7,6 +7,7 @@ use App\Models\InboxMensaje;
 use App\Models\Setting;
 use App\Models\SolicitudReferencia;
 use App\Models\User;
+use App\Services\GmailService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Mail\Message;
@@ -161,6 +162,73 @@ class InboxTest extends TestCase
             ->getJson('/api/inbox')
             ->assertOk()
             ->assertJsonPath('data.0.etiquetas', ['\\Inbox', 'PACIENTES NO RED']);
+    }
+
+    public function test_respuesta_imap_sin_corchetes_conserva_hilo_y_etiqueta(): void
+    {
+        $padre = $this->correo([
+            'message_id' => 'original@clinica.test',
+            'thread_id' => 'original@clinica.test',
+            'etiquetas' => ['PRUEBA'],
+            'carpeta' => 'Contestados',
+        ]);
+        $servicio = app(GmailService::class);
+        $crear = new \ReflectionMethod($servicio, 'crearMensaje');
+        $crear->invoke($servicio, [
+            'gmail_id' => 'imap-respuesta-sin-corchetes',
+            'message_id' => 'respuesta@clinica.test',
+            'in_reply_to' => 'original@clinica.test',
+            'referencias' => 'original@clinica.test',
+            'remitente' => 'Clínica',
+            'remitente_email' => 'clinica@example.com',
+            'asunto' => 'Re: Prueba',
+            'recibido_en' => now(),
+            'etiquetas' => ['INBOX'],
+        ]);
+
+        $respuesta = InboxMensaje::where('gmail_id', 'imap-respuesta-sin-corchetes')->sole();
+        $this->assertSame($padre->thread_id, $respuesta->thread_id);
+        $this->assertContains('PRUEBA', $respuesta->etiquetas);
+    }
+
+    public function test_abrir_respuesta_imap_reune_hilo_separado_y_su_etiqueta(): void
+    {
+        $padre = $this->correo([
+            'message_id' => 'padre@clinica.test',
+            'thread_id' => 'padre@clinica.test',
+            'etiquetas' => ['PRUEBA'],
+            'carpeta' => 'Contestados',
+        ]);
+        $respuesta = $this->correo([
+            'gmail_id' => 'imap-hilo-separado',
+            'message_id' => 'hijo@clinica.test',
+            'thread_id' => 'hijo@clinica.test',
+            'referencias' => 'padre@clinica.test',
+            'etiquetas' => ['INBOX'],
+        ]);
+
+        $this->actingAs($this->staff())
+            ->getJson("/api/inbox/{$respuesta->id}")
+            ->assertOk()
+            ->assertJsonPath('data.thread_id', $padre->thread_id)
+            ->assertJsonPath('data.etiquetas', ['INBOX', 'PRUEBA']);
+
+        $this->getJson("/api/inbox/{$respuesta->id}/hilo")->assertOk()->assertJsonCount(2, 'data');
+        $this->getJson('/api/inbox')->assertOk()->assertJsonPath('data.0.hilo_total', 2);
+    }
+
+    public function test_reconciliar_sin_padre_disponible_no_separa_un_hilo_existente(): void
+    {
+        $correo = $this->correo([
+            'gmail_id' => 'imap-sin-padre',
+            'message_id' => 'hijo@clinica.test',
+            'thread_id' => 'hilo-conocido',
+            'referencias' => '<no-disponible@clinica.test>',
+        ]);
+
+        app(GmailService::class)->reconciliarHilo($correo);
+
+        $this->assertSame('hilo-conocido', $correo->fresh()->thread_id);
     }
 
     public function test_respuesta_en_entrada_muestra_etiquetas_del_hilo_archivado(): void
