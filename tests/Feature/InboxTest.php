@@ -11,6 +11,7 @@ use App\Services\GmailService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Mail\Message;
+use Mockery\MockInterface;
 use Symfony\Component\Mime\Email;
 use Tests\TestCase;
 
@@ -274,6 +275,47 @@ class InboxTest extends TestCase
             ->putJson("/api/inbox/{$correo->id}/etiquetas", ['etiquetas' => ['PACIENTES NO RED']])
             ->assertOk()
             ->assertJsonPath('data.etiquetas', ['PACIENTES NO RED']);
+    }
+
+    public function test_etiquetas_del_hilo_se_editan_juntas_sin_afectar_otro_correo_del_mismo_remitente(): void
+    {
+        $viejo = $this->correo(['thread_id' => 'hilo-paciente-1', 'carpeta' => 'Contestados', 'etiquetas' => ['SENT', 'PRUEBA']]);
+        $nuevo = $this->correo(['thread_id' => 'hilo-paciente-1', 'etiquetas' => ['INBOX']]);
+        $otroPaciente = $this->correo(['thread_id' => 'hilo-paciente-2', 'etiquetas' => ['INBOX', 'PRUEBA']]);
+
+        $this->partialMock(GmailService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('ponerEtiquetas')->times(4)
+                ->andReturnUsing(function (InboxMensaje $correo, array $deseadas): array {
+                    $sistema = array_filter($correo->etiquetas ?? [], InboxMensaje::esEtiquetaSistema(...));
+                    $correo->update(['etiquetas' => array_values(array_merge($sistema, $deseadas))]);
+
+                    return $deseadas;
+                });
+        });
+
+        $this->actingAs($this->staff())
+            ->getJson("/api/inbox/{$nuevo->id}")
+            ->assertOk()
+            ->assertJsonPath('data.etiquetas', ['INBOX', 'PRUEBA']);
+
+        $this->putJson("/api/inbox/{$nuevo->id}/etiquetas", ['etiquetas' => ['ACEPTACIONES']])
+            ->assertOk()
+            ->assertJsonPath('data.etiquetas', ['ACEPTACIONES']);
+
+        $this->assertSame(['SENT', 'ACEPTACIONES'], $viejo->fresh()->etiquetas);
+        $this->assertSame(['INBOX', 'ACEPTACIONES'], $nuevo->fresh()->etiquetas);
+        $this->assertSame(['INBOX', 'PRUEBA'], $otroPaciente->fresh()->etiquetas);
+
+        $this->putJson("/api/inbox/{$nuevo->id}/etiquetas", ['etiquetas' => []])
+            ->assertOk()
+            ->assertJsonPath('data.etiquetas', []);
+
+        $this->assertSame(['SENT'], $viejo->fresh()->etiquetas);
+        $this->assertSame(['INBOX'], $nuevo->fresh()->etiquetas);
+        $lista = $this->getJson('/api/inbox')->assertOk()->json('data');
+        $this->assertSame(['INBOX'], collect($lista)->firstWhere('id', $nuevo->id)['etiquetas']);
+        $this->assertSame(['INBOX', 'PRUEBA'], collect($lista)->firstWhere('id', $otroPaciente->id)['etiquetas']);
+        $this->getJson("/api/inbox/{$nuevo->id}")->assertOk()->assertJsonPath('data.etiquetas', ['INBOX']);
     }
 
     public function test_cambiar_etiquetas_sin_buzon_devuelve_error_claro(): void

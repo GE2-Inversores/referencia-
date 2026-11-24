@@ -173,8 +173,7 @@ class InboxController extends Controller
     }
 
     /**
-     * Deja en el correo, dentro del propio buzón de Gmail, las etiquetas
-     * personalizadas enviadas — el equivalente a marcarlo en Gmail.
+     * Aplica las etiquetas a toda la conversación, tanto en Gmail como en la bandeja.
      */
     public function etiquetasUpdate(Request $request, InboxMensaje $mensaje, GmailService $gmail): JsonResponse
     {
@@ -184,7 +183,7 @@ class InboxController extends Controller
         ]);
 
         try {
-            $finales = $gmail->ponerEtiquetas($mensaje, $validated['etiquetas']);
+            $finales = $gmail->ponerEtiquetasEnHilo($mensaje, $validated['etiquetas']);
         } catch (Throwable $e) {
             Log::warning('Bandeja: no se pudieron aplicar las etiquetas.', ['mensaje' => $mensaje->id, 'error' => $e->getMessage()]);
 
@@ -267,6 +266,15 @@ class InboxController extends Controller
 
         $gmail->reconciliarHilo($mensaje);
         $mensaje->load(['solicitud:id,inbox_mensaje_id,estado,nombre_quien_responde,created_at']);
+
+        if (filled($mensaje->thread_id)) {
+            $personalizadas = InboxMensaje::where('thread_id', $mensaje->thread_id)
+                ->whereNotNull('etiquetas')
+                ->get(['etiquetas'])
+                ->flatMap(fn (InboxMensaje $correo): array => $correo->etiquetas ?? [])
+                ->filter(fn ($etiqueta): bool => is_string($etiqueta) && ! InboxMensaje::esEtiquetaSistema($etiqueta));
+            $mensaje->etiquetas = collect($mensaje->etiquetas ?? [])->merge($personalizadas)->unique()->values()->all();
+        }
 
         return response()->json(['data' => $mensaje]);
     }

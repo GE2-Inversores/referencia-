@@ -1446,6 +1446,25 @@ class GmailService
     }
 
     /**
+     * @param  array<int, string>  $deseadas
+     * @return array<int, string>
+     */
+    public function ponerEtiquetasEnHilo(InboxMensaje $mensaje, array $deseadas): array
+    {
+        $mensajes = filled($mensaje->thread_id)
+            ? InboxMensaje::where('thread_id', $mensaje->thread_id)->orderBy('id')->get()
+            : collect([$mensaje]);
+
+        $finales = [];
+
+        foreach ($mensajes as $correo) {
+            $finales = $this->ponerEtiquetas($correo, $deseadas);
+        }
+
+        return $finales;
+    }
+
+    /**
      * @param  array<int, string>  $agregar
      * @param  array<int, string>  $quitar
      */

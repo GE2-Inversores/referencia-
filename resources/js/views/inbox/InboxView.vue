@@ -154,6 +154,9 @@
                 <button type="button" class="inbx-sol-btn inbx-sol-ok" @click="abrirAceptar">
                   <span class="inbx-sol-btnico"><component :is="ClipboardIcon" /></span> Gestionar
                 </button>
+                <button type="button" class="inbx-sol-btn inbx-sol-fwd" :disabled="respondiendo || !seleccionado.remitente_email" @click="abrirContestar">
+                  <span class="inbx-sol-btnico"><component :is="ReplyIcon" /></span> Contestar
+                </button>
                 <button type="button" class="inbx-sol-btn inbx-sol-no" @click="abrirNegar">
                   <span class="inbx-sol-btnico"><component :is="XIcon" /></span> Negar
                 </button>
@@ -171,6 +174,7 @@
             </p>
             <div class="inbx-mover">
               <button
+                v-if="!(esCorreoSolicitud && !seleccionado.gestion && !seleccionado.solicitud)"
                 type="button" class="inbx-ans" :disabled="respondiendo || !seleccionado.remitente_email"
                 title="Responder al remitente dentro del mismo hilo del correo" @click="abrirContestar"
               >
@@ -840,13 +844,16 @@ async function guardarEtiquetas(valores: (string | number)[]): Promise<void> {
   if (!seleccionado.value) {
     return;
   }
+  const id = seleccionado.value.id;
   guardandoEtiquetas.value = true;
   try {
-    const { data } = await http.put(`/api/inbox/${seleccionado.value.id}/etiquetas`, {
+    const { data } = await http.put(`/api/inbox/${id}/etiquetas`, {
       etiquetas: valores.map(String),
     });
-    seleccionado.value.etiquetas = data.data.etiquetas;
-    const item = mensajes.value.find((x) => x.id === seleccionado.value!.id);
+    if (seleccionado.value?.id === id) {
+      seleccionado.value.etiquetas = data.data.etiquetas;
+    }
+    const item = mensajes.value.find((x) => x.id === id);
     if (item) {
       item.etiquetas = data.data.etiquetas;
     }
@@ -1655,6 +1662,10 @@ async function refrescar(): Promise<void> {
     meta.value.paginas = data.meta.paginas;
 
     const nuevos = data.data as InboxItem[];
+    const seleccionadoActualizado = nuevos.find((m) => m.id === seleccionado.value?.id);
+    if (seleccionado.value && seleccionadoActualizado && !guardandoEtiquetas.value) {
+      seleccionado.value.etiquetas = seleccionadoActualizado.etiquetas;
+    }
     if (meta.value.pagina <= 1) {
       mensajes.value = nuevos;
       return;
