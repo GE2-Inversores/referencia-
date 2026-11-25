@@ -105,6 +105,8 @@ class LugarSinDisponibilidadTest extends TestCase
                 ->assertJsonPath('data.tiempo_llegada_horas', $horas)
                 ->assertJsonPath('data.hora_llegada', '14:30');
 
+            $this->assertNotNull($solicitud->fresh()->tiempo_llegada_inicia_en);
+
             $this->assertSame($horas, $solicitud->fresh()->tiempo_llegada_horas);
             $this->assertSame('14:30', $solicitud->fresh()->hora_llegada);
         }

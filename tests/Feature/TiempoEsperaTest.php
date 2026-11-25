@@ -51,8 +51,9 @@ class TiempoEsperaTest extends TestCase
             'tipo' => 'en_espera',
             'titulo' => 'Aceptado',
         ]);
+        $aceptadoEn = now()->subMinutes(45);
         $evento->timestamps = false;
-        $evento->created_at = now()->subMinutes(45);
+        $evento->created_at = $aceptadoEn;
         $evento->save();
 
         $this->actingAs($this->staff())
@@ -62,7 +63,21 @@ class TiempoEsperaTest extends TestCase
             ->assertJsonPath('data.0.id', $enEspera->id)
             ->assertJsonPath('data.0.paciente', 'Ana Prueba')
             ->assertJsonPath('data.0.eps', 'SANITAS EPS')
-            ->assertJsonPath('data.0.aceptado_en', now()->subMinutes(45)->toIso8601String());
+            ->assertJsonPath('data.0.aceptado_en', $aceptadoEn->toIso8601String());
+    }
+
+    public function test_incluye_el_tiempo_de_llegada_y_su_inicio_para_la_cuenta_regresiva(): void
+    {
+        $solicitud = $this->solicitud('en_espera');
+        $solicitud->tiempo_llegada_horas = 6;
+        $solicitud->tiempo_llegada_inicia_en = now()->subMinutes(10)->startOfSecond();
+        $solicitud->save();
+
+        $this->actingAs($this->staff())
+            ->getJson('/api/solicitudes-referencia/en-espera-tiempo')
+            ->assertOk()
+            ->assertJsonPath('data.0.tiempo_llegada_horas', 6)
+            ->assertJsonPath('data.0.tiempo_llegada_inicia_en', now()->subMinutes(10)->startOfSecond()->toIso8601String());
     }
 
     public function test_sin_aceptados_responde_lista_vacia(): void

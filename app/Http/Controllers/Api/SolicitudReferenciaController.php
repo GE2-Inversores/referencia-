@@ -59,7 +59,7 @@ class SolicitudReferenciaController extends Controller
     public function enEsperaTiempo(): JsonResponse
     {
         $solicitudes = SolicitudReferencia::query()
-            ->select(['id', 'primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido', 'tipo_documento', 'numero_documento', 'eps', 'especialidad_requerida', 'institucion_remitente', 'codigo_aceptacion', 'updated_at'])
+            ->select(['id', 'primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido', 'tipo_documento', 'numero_documento', 'eps', 'especialidad_requerida', 'institucion_remitente', 'codigo_aceptacion', 'updated_at', 'tiempo_llegada_horas', 'tiempo_llegada_inicia_en'])
             ->where('estado', 'en_espera')
             ->with(['eventos' => fn ($q) => $q->select('id', 'solicitud_referencia_id', 'tipo', 'created_at')->where('tipo', 'en_espera')->latest('id')])
             ->get()
@@ -72,6 +72,8 @@ class SolicitudReferenciaController extends Controller
                 'clinica' => $s->institucion_remitente,
                 'codigo' => $s->codigo_aceptacion,
                 'aceptado_en' => ($s->eventos->first()?->created_at ?? $s->updated_at)?->toIso8601String(),
+                'tiempo_llegada_horas' => $s->tiempo_llegada_horas,
+                'tiempo_llegada_inicia_en' => $s->tiempo_llegada_inicia_en?->toIso8601String(),
             ])
             ->sortBy('aceptado_en')
             ->values();
@@ -373,6 +375,7 @@ class SolicitudReferenciaController extends Controller
 
         // Aceptar y marcar en espera de llegada son un solo paso — no existe
         // un estado "aceptado" intermedio.
+        $tiempoLlegadaHoras = $validated['tiempo_llegada_horas'] ?? $solicitud->tiempo_llegada_horas;
         $solicitud->update([
             'estado' => 'en_espera',
             'eps' => $validated['eps'],
@@ -380,7 +383,8 @@ class SolicitudReferenciaController extends Controller
             'hora_respuesta' => $validated['hora_respuesta'],
             'nombre_quien_responde' => $validated['nombre_quien_responde'],
             'hora_llegada' => $validated['hora_llegada'],
-            'tiempo_llegada_horas' => $validated['tiempo_llegada_horas'] ?? $solicitud->tiempo_llegada_horas,
+            'tiempo_llegada_horas' => $tiempoLlegadaHoras,
+            'tiempo_llegada_inicia_en' => $tiempoLlegadaHoras !== $solicitud->tiempo_llegada_horas || ! $solicitud->tiempo_llegada_inicia_en ? now() : $solicitud->tiempo_llegada_inicia_en,
             'lugar_llegada' => $validated['lugar_llegada'],
             'sede' => $validated['sede'] ?? null,
             'observaciones_respuesta' => $validated['observaciones_respuesta'] ?? null,

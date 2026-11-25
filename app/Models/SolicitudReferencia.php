@@ -83,6 +83,7 @@ class SolicitudReferencia extends Model
         'hora_respuesta',
         'hora_llegada',
         'tiempo_llegada_horas',
+        'tiempo_llegada_inicia_en',
         'lugar_llegada',
         'sede',
         'motivo_negacion',
@@ -98,6 +99,7 @@ class SolicitudReferencia extends Model
         'gestante' => 'boolean',
         'urgencia_vital' => 'boolean',
         'tiempo_llegada_horas' => 'integer',
+        'tiempo_llegada_inicia_en' => 'datetime',
     ];
 
     public function clinica(): BelongsTo

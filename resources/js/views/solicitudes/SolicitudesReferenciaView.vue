@@ -1606,6 +1606,7 @@ interface Solicitud {
   hora_respuesta?: string;
   hora_llegada?: string;
   tiempo_llegada_horas?: number | null;
+  tiempo_llegada_inicia_en?: string | null;
   lugar_llegada?: string;
   inbox_mensaje_id?: number | null;
   inbox_mensaje_id?: number | null;

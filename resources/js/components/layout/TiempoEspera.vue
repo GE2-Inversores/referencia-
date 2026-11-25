@@ -1,7 +1,7 @@
 <template>
   <button
     class="w-8 h-8 rounded flex items-center justify-center transition-colors relative border-none cursor-pointer bg-transparent hover:bg-white/10 text-[var(--blue-300)] hover:text-white"
-    title="Pacientes aceptados en espera"
+    title="Tiempo de llegada de pacientes aceptados"
     @click="abrir"
   >
     <TimerIcon class="w-4.5 h-4.5" />
@@ -20,7 +20,7 @@
           <TimerIcon class="w-4.5 h-4.5" />
         </span>
         <div class="leading-tight">
-          <p class="text-[15px] font-bold text-gray-800">Tiempo en espera</p>
+          <p class="text-[15px] font-bold text-gray-800">Tiempo de llegada</p>
           <p class="text-[11px] text-gray-400 font-medium">{{ items.length }} aceptado{{ items.length === 1 ? '' : 's' }} esperando ingreso</p>
         </div>
       </div>
@@ -68,8 +68,13 @@
         </div>
 
         <div class="shrink-0 text-right">
-          <p class="text-[15px] font-extrabold tabular-nums text-amber-500 leading-tight">{{ esperando(s.aceptado_en) }}</p>
-          <p class="text-[9.5px] font-semibold text-gray-400 uppercase tracking-wide mt-0.5">en espera</p>
+          <p v-if="s.tiempo_llegada_horas" class="text-[15px] font-extrabold tabular-nums leading-tight" :class="tiempoVencido(s) ? 'text-red-500' : 'text-emerald-600'">
+            {{ cuentaRegresiva(s) }}
+          </p>
+          <p v-else class="text-[15px] font-extrabold tabular-nums text-amber-500 leading-tight">{{ esperando(s.aceptado_en) }}</p>
+          <p class="text-[9.5px] font-semibold text-gray-400 uppercase tracking-wide mt-0.5">
+            {{ s.tiempo_llegada_horas ? (tiempoVencido(s) ? 'tiempo vencido' : `de ${s.tiempo_llegada_horas} h`) : 'en espera' }}
+          </p>
         </div>
       </div>
     </div>
@@ -92,6 +97,8 @@ interface EnEspera {
   clinica: string | null;
   codigo: string | null;
   aceptado_en: string | null;
+  tiempo_llegada_horas: number | null;
+  tiempo_llegada_inicia_en: string | null;
 }
 
 const items = ref<EnEspera[]>([]);
@@ -143,6 +150,31 @@ function esperando(iso: string | null): string {
   return `${Math.floor(h / 24)} d ${h % 24} h`;
 }
 
+function tiempoInicio(s: EnEspera): number | null {
+  const base = s.tiempo_llegada_inicia_en || s.aceptado_en;
+  if (!base) return null;
+  return new Date(base).getTime();
+}
+
+function tiempoRestanteSegundos(s: EnEspera): number {
+  const inicio = tiempoInicio(s);
+  const horas = Number(s.tiempo_llegada_horas ?? 0);
+  if (!inicio || !horas) return 0;
+  return Math.max(0, Math.floor((inicio + horas * 3_600_000 - ahora.value) / 1000));
+}
+
+function tiempoVencido(s: EnEspera): boolean {
+  return tiempoRestanteSegundos(s) === 0;
+}
+
+function cuentaRegresiva(s: EnEspera): string {
+  const total = tiempoRestanteSegundos(s);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const seg = total % 60;
+  return `${h}:${String(m).padStart(2, '0')}:${String(seg).padStart(2, '0')}`;
+}
+
 function irASolicitud(id: number): void {
   visible.value = false;
   void router.push(`/solicitudes-referencia?resaltar=${id}`);
@@ -152,7 +184,7 @@ usePolling(cargar, 60_000);
 
 onMounted(() => {
   void cargar();
-  tick = setInterval(() => { ahora.value = Date.now(); }, 30_000);
+  tick = setInterval(() => { ahora.value = Date.now(); }, 1_000);
 });
 
 onUnmounted(() => {
