@@ -26,6 +26,27 @@
       </div>
     </template>
 
+    <div class="flex gap-2 mb-3">
+      <button
+        type="button"
+        class="flex-1 px-3 py-2 rounded-lg text-[12px] font-bold border transition-colors cursor-pointer"
+        :class="tab === 'llegada' ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'"
+        @click="tab = 'llegada'"
+      >
+        Tiempo de llegada
+        <span class="ml-1 text-[10px] font-semibold" :class="tab === 'llegada' ? 'text-emerald-500' : 'text-gray-400'">({{ conTiempoLlegada.length }})</span>
+      </button>
+      <button
+        type="button"
+        class="flex-1 px-3 py-2 rounded-lg text-[12px] font-bold border transition-colors cursor-pointer"
+        :class="tab === 'aceptado' ? 'bg-amber-50 border-amber-300 text-amber-700' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'"
+        @click="tab = 'aceptado'"
+      >
+        Tiempo de aceptado
+        <span class="ml-1 text-[10px] font-semibold" :class="tab === 'aceptado' ? 'text-amber-500' : 'text-gray-400'">({{ items.length }})</span>
+      </button>
+    </div>
+
     <el-input
       v-model="busqueda"
       placeholder="Buscar por nombre o documento…"
@@ -41,7 +62,7 @@
     <div v-loading="cargando" class="max-h-[440px] overflow-y-auto -mx-1 px-1">
       <div v-if="!cargando && filtrados.length === 0" class="py-12 text-center text-gray-400 text-sm">
         <TimerOffIcon class="w-9 h-9 mx-auto mb-2.5 text-gray-300" />
-        {{ items.length === 0 ? 'No hay pacientes en espera' : 'Sin resultados para esa búsqueda' }}
+        {{ mensajeVacio }}
       </div>
 
       <div
@@ -68,13 +89,18 @@
         </div>
 
         <div class="shrink-0 text-right">
-          <p v-if="s.tiempo_llegada_horas" class="text-[15px] font-extrabold tabular-nums leading-tight" :class="tiempoVencido(s) ? 'text-red-500' : 'text-emerald-600'">
-            {{ cuentaRegresiva(s) }}
-          </p>
-          <p v-else class="text-[15px] font-extrabold tabular-nums text-amber-500 leading-tight">{{ esperando(s.aceptado_en) }}</p>
-          <p class="text-[9.5px] font-semibold text-gray-400 uppercase tracking-wide mt-0.5">
-            {{ s.tiempo_llegada_horas ? (tiempoVencido(s) ? 'tiempo vencido' : `de ${s.tiempo_llegada_horas} h`) : 'en espera' }}
-          </p>
+          <template v-if="tab === 'llegada'">
+            <p class="text-[15px] font-extrabold tabular-nums leading-tight" :class="tiempoVencido(s) ? 'text-red-500' : 'text-emerald-600'">
+              {{ cuentaRegresiva(s) }}
+            </p>
+            <p class="text-[9.5px] font-semibold text-gray-400 uppercase tracking-wide mt-0.5">
+              {{ tiempoVencido(s) ? 'tiempo vencido' : `de ${s.tiempo_llegada_horas} h` }}
+            </p>
+          </template>
+          <template v-else>
+            <p class="text-[15px] font-extrabold tabular-nums text-amber-500 leading-tight">{{ esperando(s.aceptado_en) }}</p>
+            <p class="text-[9.5px] font-semibold text-gray-400 uppercase tracking-wide mt-0.5">en espera</p>
+          </template>
         </div>
       </div>
     </div>
@@ -109,13 +135,26 @@ const router = useRouter();
 const ahora = ref(Date.now());
 let tick: ReturnType<typeof setInterval> | null = null;
 
+const tab = ref<'llegada' | 'aceptado'>('llegada');
+
+const conTiempoLlegada = computed(() => items.value.filter((s) => s.tiempo_llegada_horas));
+
+const itemsTab = computed(() => tab.value === 'llegada' ? conTiempoLlegada.value : items.value);
+
 const filtrados = computed(() => {
   const q = busqueda.value.trim().toLowerCase();
-  if (!q) return items.value;
+  if (!q) return itemsTab.value;
 
-  return items.value.filter((s) =>
+  return itemsTab.value.filter((s) =>
     s.paciente.toLowerCase().includes(q) || (s.documento ?? '').toLowerCase().includes(q),
   );
+});
+
+const mensajeVacio = computed(() => {
+  if (busqueda.value.trim()) return 'Sin resultados para esa búsqueda';
+  if (items.value.length === 0) return 'No hay pacientes en espera';
+  if (tab.value === 'llegada') return 'Ningún paciente tiene plazo de llegada asignado';
+  return 'No hay pacientes en espera';
 });
 
 async function cargar(): Promise<void> {
