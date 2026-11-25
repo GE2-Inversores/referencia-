@@ -857,7 +857,7 @@
                     </button>
                   </div>
                 </div>
-                <div class="mb-1.5">
+                <div v-if="formAceptar.sin_disponibilidad" class="mb-1.5">
                   <label class="accion-field-label">EPS <span class="accion-required">*</span></label>
                   <el-select v-model="formAceptar.eps" filterable placeholder="Seleccione la EPS con su contrato" class="w-full" popper-class="negar-motivo-popper">
                     <el-option v-for="e in EPS_LIST" :key="e" :label="e" :value="e" />
@@ -890,7 +890,13 @@
                     Enviar a Gomedisys
                   </button>
                 </div>
-                <div class="grid grid-cols-2 gap-2 mb-1.5">
+                <div class="grid grid-cols-2 gap-2 mb-1.5 aceptar-datos-llegada">
+                  <div>
+                    <label class="accion-field-label">EPS <span class="accion-required">*</span></label>
+                    <el-select v-model="formAceptar.eps" filterable placeholder="Seleccione la EPS con su contrato" class="w-full" popper-class="negar-motivo-popper">
+                      <el-option v-for="e in EPS_LIST" :key="e" :label="e" :value="e" />
+                    </el-select>
+                  </div>
                   <div>
                     <label class="accion-field-label">Sede <span class="accion-required">*</span></label>
                     <el-select v-model="formAceptar.sede" placeholder="Seleccione la sede" class="w-full" popper-class="negar-motivo-popper">
@@ -4631,23 +4637,34 @@ usePolling(() => {
   overflow: hidden;
   box-shadow: 0 32px 80px rgba(11, 35, 73, .4), 0 0 0 1px rgba(255,255,255,.08);
 }
-:deep(.accion-dialog-aceptar) { max-width: calc(100vw - 32px); }
-.accion-dialog-aceptar .detalle-content { max-height: calc(100dvh - 48px); }
-.accion-dialog-aceptar .detalle-body { overflow-y: auto; }
+:deep(.accion-dialog-aceptar) { max-width: calc(100vw - 24px); padding: 10px; }
+.accion-dialog-aceptar .detalle-content { max-height: calc(100dvh - 44px); }
+.accion-dialog-aceptar .detalle-head { padding: 8px 14px; }
+.accion-dialog-aceptar .detalle-head-icon { width: 32px; height: 32px; }
+.accion-dialog-aceptar .detalle-body { padding: 6px 10px; overflow-y: auto; }
 .accion-dialog-aceptar .detalle-card, .accion-dialog-aceptar .accion-patient-card { flex-shrink: 0; }
-.accion-dialog-aceptar .accion-form-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
+.accion-dialog-aceptar .accion-patient-card { padding: 6px 10px; margin-bottom: 6px; }
+.accion-dialog-aceptar .accion-form-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; padding: 8px 10px; align-items: start; }
+.accion-dialog-aceptar .accion-form-body > * { min-width: 0; margin-bottom: 0; }
 .accion-dialog-aceptar .accion-form-body > .grid,
-.accion-dialog-aceptar .accion-form-body > .accion-gomedisys-callout,
 .accion-dialog-aceptar .accion-form-body > .accion-sin-cama-callout,
 .accion-dialog-aceptar .accion-form-body > .accion-field-hint,
 .accion-dialog-aceptar .accion-form-body > .negar-attach { grid-column: 1 / -1; }
-.accion-dialog-aceptar .accion-form-body > .grid-cols-2 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.accion-dialog-aceptar .correo-destino-row { flex-wrap: wrap; }
+.accion-dialog-aceptar .aceptar-datos-llegada { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 12px; }
+.accion-dialog-aceptar .accion-field-label { margin-bottom: 3px; }
+.accion-dialog-aceptar .aceptar-disp-btn { padding: 6px 8px; }
+.accion-dialog-aceptar .accion-gomedisys-callout { align-self: end; padding: 7px 10px; gap: 8px; min-height: 44px; }
+.accion-dialog-aceptar .accion-gomedisys-callout-text { font-size: 10px; line-height: 1.35; }
+.accion-dialog-aceptar .accion-gomedisys-btn { padding: 6px 8px; white-space: nowrap; }
+.accion-dialog-aceptar .el-date-editor.el-input { width: 100%; }
+.accion-dialog-aceptar .correo-destino-row { flex-wrap: wrap; gap: 4px; }
+.accion-dialog-aceptar .correo-destino-chip { max-width: 100%; padding: 3px 8px; }
 .accion-dialog-aceptar .correo-destino-row .el-select { flex-basis: 100%; }
+.accion-dialog-aceptar .detalle-footer { padding: 8px 10px; }
 .accion-dialog-aceptar .detalle-footer, .accion-dialog-aceptar .detalle-head { flex-shrink: 0; }
 @media (max-width: 640px) {
   .accion-dialog-aceptar .accion-form-body { grid-template-columns: minmax(0, 1fr); }
-  .accion-dialog-aceptar .accion-form-body > .grid-cols-2 { grid-template-columns: minmax(0, 1fr); }
+  .accion-dialog-aceptar .accion-form-body > .grid { grid-template-columns: minmax(0, 1fr); }
 }
 :deep(.accion-dialog .el-dialog__header) { display: none; }
 :deep(.accion-dialog .el-dialog__body) { padding: 0; overflow: hidden; }
