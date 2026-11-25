@@ -308,6 +308,7 @@ class SolicitudReferenciaController extends Controller
             // exige cuando sí hay cupo disponible.
             'codigo_aceptacion' => ['nullable', Rule::requiredIf(fn () => ! $sinDisponibilidad), 'string', 'max:20', Rule::unique('solicitudes_referencia', 'codigo_aceptacion')->ignore($solicitud->id)],
             'hora_llegada' => ['nullable', Rule::requiredIf(fn () => ! $sinDisponibilidad), 'date_format:H:i'],
+            'tiempo_llegada_horas' => ['nullable', 'integer', Rule::in([6, 12])],
             // El lugar de referencia se define siempre; sin cupo solo se guarda y
             // NO viaja a la clínica hasta que se asigne el código de aceptación.
             'lugar_llegada' => ['required', 'string', 'max:150'],
@@ -379,6 +380,7 @@ class SolicitudReferenciaController extends Controller
             'hora_respuesta' => $validated['hora_respuesta'],
             'nombre_quien_responde' => $validated['nombre_quien_responde'],
             'hora_llegada' => $validated['hora_llegada'],
+            'tiempo_llegada_horas' => $validated['tiempo_llegada_horas'] ?? $solicitud->tiempo_llegada_horas,
             'lugar_llegada' => $validated['lugar_llegada'],
             'sede' => $validated['sede'] ?? null,
             'observaciones_respuesta' => $validated['observaciones_respuesta'] ?? null,

@@ -440,6 +440,7 @@
                   <div v-if="solicitudSeleccionada.codigo_aceptacion" class="data-row"><span>Código Gomedisys</span><strong class="font-mono">{{ solicitudSeleccionada.codigo_aceptacion }}</strong></div>
                   <div v-if="solicitudSeleccionada.estado === 'pendiente_cama' && solicitudSeleccionada.lugar_llegada" class="data-row"><span>Lugar de referencia</span><strong>{{ solicitudSeleccionada.lugar_llegada }} <small class="text-gray-400">(se envía con el código)</small></strong></div>
                   <div v-if="solicitudSeleccionada.hora_llegada" class="data-row"><span>Llegada esperada</span><strong>{{ formatHora(solicitudSeleccionada.hora_llegada) }} · {{ solicitudSeleccionada.lugar_llegada }}<template v-if="solicitudSeleccionada.sede"> · Sede {{ solicitudSeleccionada.sede }}</template></strong></div>
+                  <div v-if="solicitudSeleccionada.tiempo_llegada_horas" class="data-row"><span>Tiempo de llegada</span><strong>{{ solicitudSeleccionada.tiempo_llegada_horas }} horas</strong></div>
                   <p v-if="!solicitudSeleccionada.quien_remitente && !solicitudSeleccionada.telefono_contacto && !solicitudSeleccionada.correo_contacto" class="text-xs text-gray-400 italic">Sin datos adicionales de remisión</p>
                 </div>
               </div>
@@ -789,7 +790,7 @@
     </el-dialog>
 
     <!-- ── Modal: Aceptar ── -->
-    <el-dialog v-model="modalAceptar" width="680px" class="accion-dialog" :show-close="false" align-center>
+    <el-dialog v-model="modalAceptar" width="960px" class="accion-dialog accion-dialog-aceptar" :show-close="false" align-center>
       <template v-if="solicitudSeleccionada">
         <div class="detalle-content">
           <button type="button" class="detalle-close-btn" @click="modalAceptar = false">
@@ -901,6 +902,13 @@
                   <div>
                     <label class="accion-field-label">Código Gomedisys (REF) <span class="accion-required">*</span></label>
                     <el-input v-model="formAceptar.codigo_aceptacion" placeholder="Ej: REF00045821" />
+                  </div>
+                  <div>
+                    <label class="accion-field-label">Tiempo de llegada</label>
+                    <el-select v-model="formAceptar.tiempo_llegada_horas" placeholder="Seleccione el tiempo" class="w-full">
+                      <el-option label="6 horas" value="6" />
+                      <el-option label="12 horas" value="12" />
+                    </el-select>
                   </div>
                   <div>
                     <label class="accion-field-label">Hora de llegada <span class="accion-required">*</span></label>
@@ -1591,6 +1599,7 @@ interface Solicitud {
   codigo_aceptacion?: string;
   hora_respuesta?: string;
   hora_llegada?: string;
+  tiempo_llegada_horas?: number | null;
   lugar_llegada?: string;
   inbox_mensaje_id?: number | null;
   inbox_mensaje_id?: number | null;
@@ -1702,7 +1711,7 @@ const modalFichaGomedisys = ref(false);
 const campoCopiado = ref<string | null>(null);
 const adjuntoActivo = ref<{ id: number; nombre_original: string; mime_type: string; tamano: number } | null>(null);
 
-const formAceptar = ref<{ [k: string]: string | boolean | string[] }>({ fecha_respuesta: '', hora_respuesta: '', nombre_quien_responde: '', sin_disponibilidad: false, sede: '', eps: '', codigo_aceptacion: '', hora_llegada: '', lugar_llegada: '', observaciones_respuesta: '', correos_extra: [] });
+const formAceptar = ref<{ [k: string]: string | boolean | string[] }>({ fecha_respuesta: '', hora_respuesta: '', nombre_quien_responde: '', sin_disponibilidad: false, sede: '', eps: '', codigo_aceptacion: '', hora_llegada: '', tiempo_llegada_horas: '', lugar_llegada: '', observaciones_respuesta: '', correos_extra: [] });
 const formNegar = ref<{ [k: string]: string | string[] }>({ fecha_respuesta: '', hora_respuesta: '', grupo_negacion: '', motivo_negacion: '', eps: '', nombre_quien_responde: '', observaciones_respuesta: '', correos_extra: [] });
 const modalCambiar = ref(false);
 const formCambiar = ref<{ [k: string]: string | string[] }>({ fecha_respuesta: '', hora_respuesta: '', nombre_quien_responde: '', estado: '', motivo: '', sede: '', codigo_aceptacion: '', hora_llegada: '', lugar_llegada: '', numero_ingreso: '', eps: '', correos_extra: [], grupo_negacion: '', motivo_negacion: '' });
@@ -2669,6 +2678,7 @@ function abrirAceptar(s: Solicitud) {
     eps: EPS_LIST.includes(s.eps) ? s.eps : '',
     codigo_aceptacion: '',
     hora_llegada: '',
+    tiempo_llegada_horas: s.tiempo_llegada_horas ? String(s.tiempo_llegada_horas) : '',
     lugar_llegada: s.lugar_llegada || '',
     observaciones_respuesta: '',
     correos_extra: [],
@@ -4620,6 +4630,24 @@ usePolling(() => {
   border-radius: 22px;
   overflow: hidden;
   box-shadow: 0 32px 80px rgba(11, 35, 73, .4), 0 0 0 1px rgba(255,255,255,.08);
+}
+:deep(.accion-dialog-aceptar) { max-width: calc(100vw - 32px); }
+.accion-dialog-aceptar .detalle-content { max-height: calc(100dvh - 48px); }
+.accion-dialog-aceptar .detalle-body { overflow-y: auto; }
+.accion-dialog-aceptar .detalle-card, .accion-dialog-aceptar .accion-patient-card { flex-shrink: 0; }
+.accion-dialog-aceptar .accion-form-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
+.accion-dialog-aceptar .accion-form-body > .grid,
+.accion-dialog-aceptar .accion-form-body > .accion-gomedisys-callout,
+.accion-dialog-aceptar .accion-form-body > .accion-sin-cama-callout,
+.accion-dialog-aceptar .accion-form-body > .accion-field-hint,
+.accion-dialog-aceptar .accion-form-body > .negar-attach { grid-column: 1 / -1; }
+.accion-dialog-aceptar .accion-form-body > .grid-cols-2 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.accion-dialog-aceptar .correo-destino-row { flex-wrap: wrap; }
+.accion-dialog-aceptar .correo-destino-row .el-select { flex-basis: 100%; }
+.accion-dialog-aceptar .detalle-footer, .accion-dialog-aceptar .detalle-head { flex-shrink: 0; }
+@media (max-width: 640px) {
+  .accion-dialog-aceptar .accion-form-body { grid-template-columns: minmax(0, 1fr); }
+  .accion-dialog-aceptar .accion-form-body > .grid-cols-2 { grid-template-columns: minmax(0, 1fr); }
 }
 :deep(.accion-dialog .el-dialog__header) { display: none; }
 :deep(.accion-dialog .el-dialog__body) { padding: 0; overflow: hidden; }

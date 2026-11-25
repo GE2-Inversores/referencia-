@@ -83,6 +83,52 @@ class LugarSinDisponibilidadTest extends TestCase
         $this->assertNull($solicitud->codigo_aceptacion);
     }
 
+    public function test_tiempo_de_llegada_se_guarda_independiente_de_la_hora(): void
+    {
+        $staff = $this->staff();
+
+        foreach ([6, 12] as $horas) {
+            $solicitud = $this->solicitud($staff);
+
+            $this->actingAs($staff)
+                ->postJson("/api/solicitudes-referencia/{$solicitud->id}/aceptar", [
+                    'hora_respuesta' => '10:30',
+                    'nombre_quien_responde' => 'Super Administrador',
+                    'eps' => 'SANITAS EPS',
+                    'sede' => 'URGENCIAS',
+                    'codigo_aceptacion' => 'REF-TIEMPO-'.$horas,
+                    'hora_llegada' => '14:30',
+                    'tiempo_llegada_horas' => (string) $horas,
+                    'lugar_llegada' => self::LUGAR,
+                ])
+                ->assertOk()
+                ->assertJsonPath('data.tiempo_llegada_horas', $horas)
+                ->assertJsonPath('data.hora_llegada', '14:30');
+
+            $this->assertSame($horas, $solicitud->fresh()->tiempo_llegada_horas);
+            $this->assertSame('14:30', $solicitud->fresh()->hora_llegada);
+        }
+    }
+
+    public function test_tiempo_de_llegada_rechaza_valores_distintos_de_seis_y_doce(): void
+    {
+        $staff = $this->staff();
+        $solicitud = $this->solicitud($staff);
+
+        foreach ([0, 8, 24, 'otro', 6.5] as $horas) {
+            $this->actingAs($staff)
+                ->postJson("/api/solicitudes-referencia/{$solicitud->id}/aceptar", $this->datosSinDisponibilidad() + [
+                    'lugar_llegada' => self::LUGAR,
+                    'tiempo_llegada_horas' => $horas,
+                ])
+                ->assertUnprocessable()
+                ->assertJsonValidationErrors('tiempo_llegada_horas', 'data.errors');
+        }
+
+        $this->assertSame('pendiente', $solicitud->fresh()->estado);
+        $this->assertNull($solicitud->fresh()->tiempo_llegada_horas);
+    }
+
     public function test_el_correo_sin_cupo_no_lleva_el_lugar_y_el_del_codigo_si(): void
     {
         $staff = $this->staff();
