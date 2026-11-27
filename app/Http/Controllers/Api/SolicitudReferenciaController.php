@@ -754,6 +754,54 @@ class SolicitudReferenciaController extends Controller
     }
 
     /**
+     * Corrige el servicio que refiere la clínica (servicio_remision) desde la
+     * tarjeta — p. ej. cuando lo radicaron en URGENCIAS pero era otro servicio.
+     */
+    public function actualizarServicio(Request $request, SolicitudReferencia $solicitud): JsonResponse
+    {
+        abort_unless($request->user()->hasPermission('clinicas.view'), Response::HTTP_FORBIDDEN);
+
+        if (in_array($solicitud->estado, self::ESTADOS_HISTORICO, true)) {
+            return response()->json(['message' => 'No se puede editar el servicio de una solicitud ya resuelta.'], 422);
+        }
+
+        $validated = $request->validate([
+            'servicio_remision' => ['required', 'string', 'max:150'],
+        ]);
+
+        $anterior = $solicitud->servicio_remision;
+        $solicitud->update(['servicio_remision' => mb_strtoupper(trim($validated['servicio_remision']))]);
+
+        $autor = $request->user()?->full_name ?? 'Sistema';
+        SolicitudReferenciaEvento::create([
+            'solicitud_referencia_id' => $solicitud->id,
+            'tipo' => 'nota',
+            'titulo' => "Servicio que refiere corregido — {$autor}",
+            'descripcion' => "De «{$anterior}» a «{$solicitud->servicio_remision}».",
+        ]);
+
+        return response()->json(['data' => $solicitud, 'message' => 'Servicio actualizado']);
+    }
+
+    /**
+     * Elimina (borrado lógico) una solicitud — pensado para registros de prueba
+     * o radicados por error. Al ser SoftDelete la fila queda en BD, pero sale
+     * de la tabla, del histórico y de los informes.
+     */
+    public function eliminar(Request $request, SolicitudReferencia $solicitud): JsonResponse
+    {
+        abort_unless($request->user()->hasPermission('clinicas.view'), Response::HTTP_FORBIDDEN);
+
+        if ($solicitud->estado === 'completado') {
+            return response()->json(['message' => 'No se puede eliminar una solicitud ya completada.'], 422);
+        }
+
+        $solicitud->delete();
+
+        return response()->json(['message' => 'Solicitud eliminada']);
+    }
+
+    /**
      * Deshace la aceptación y devuelve la solicitud a pendiente.
      *
      * Una vez negada, la solicitud queda definitiva a propósito (el personal

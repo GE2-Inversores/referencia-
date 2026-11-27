@@ -8,6 +8,7 @@ use App\Models\SolicitudReferencia;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 
 /**
  * Agrega clínicas y solicitudes de referencia de ejemplo, con historial
@@ -51,7 +52,9 @@ class DemoDataSeeder extends Seeder
     private array $municipios = ['candelaria', 'palmira', 'pradera', 'Barranquilla', 'Cali', 'Buga', 'Popayán', 'Pasto'];
 
     private array $nombresM = ['jorge', 'carlos', 'andres', 'juan', 'luis', 'miguel', 'santiago', 'daniel', 'oscar', 'ricardo', 'fernando', 'jose', 'alejandro', 'diego', 'sebastian'];
+
     private array $nombresF = ['maria', 'laura', 'sofia', 'valentina', 'camila', 'natalia', 'paula', 'diana', 'andrea', 'carolina', 'juliana', 'martha', 'sandra', 'lucia', 'gabriela'];
+
     private array $apellidos = ['gomez', 'rodriguez', 'martinez', 'lopez', 'garcia', 'perez', 'gonzalez', 'sanchez', 'ramirez', 'torres', 'herrera', 'castro', 'ortiz', 'rojas', 'vargas', 'moreno', 'jimenez', 'diaz', 'munoz', 'pardo'];
 
     private array $diagnosticosPool = [
@@ -79,7 +82,7 @@ class DemoDataSeeder extends Seeder
     }
 
     /**
-     * @return \Illuminate\Support\Collection<int, Clinica>
+     * @return Collection<int, Clinica>
      */
     private function crearClinicas()
     {

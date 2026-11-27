@@ -195,7 +195,12 @@
                     <p class="sol-reference-contact" v-if="s.quien_remitente || s.telefono_contacto" :title="[s.quien_remitente, s.telefono_contacto].filter(Boolean).join(' · ')">
                     {{ s.quien_remitente || '—' }}<span v-if="s.telefono_contacto"> · {{ s.telefono_contacto }}</span>
                     </p>
-                    <span class="sol-reference-label sol-reference-diagnosis-label">Servicio que refiere</span>
+                    <span class="sol-reference-label sol-reference-diagnosis-label">
+                      Servicio que refiere
+                      <button type="button" class="sol-servicio-edit" title="Corregir servicio" aria-label="Corregir servicio que refiere" @click="abrirEditarServicio(s)">
+                        <component :is="PencilIcon" class="w-3 h-3" />
+                      </button>
+                    </span>
                     <p class="sol-reference-diagnosis" :title="s.servicio_remision || s.servicio_ubicacion_actual">{{ s.servicio_remision || s.servicio_ubicacion_actual || '—' }}</p>
                   </div>
                   <div class="sol-reference-clinical sol-reference-divider">
@@ -257,6 +262,7 @@
                           <el-dropdown-item v-if="s.estado === 'pendiente_cama'" command="evolucion" :icon="SendIcon" class="sol-accion-teal" divided>Solicitar evolución por correo</el-dropdown-item>
                           <el-dropdown-item v-if="s.estado === 'pendiente_cama' || s.estado === 'en_espera'" command="nota" :icon="StickyNoteIcon" class="sol-accion-amber">Agregar nota</el-dropdown-item>
                           <el-dropdown-item v-if="s.estado !== 'pendiente'" command="cambiar" :icon="RotateCcwIcon" class="sol-accion-violet">Cambiar estado</el-dropdown-item>
+                          <el-dropdown-item command="eliminar" :icon="Trash2Icon" class="sol-accion-danger" divided>Eliminar</el-dropdown-item>
                         </el-dropdown-menu>
                       </template>
                     </el-dropdown>
@@ -1491,6 +1497,43 @@
       </template>
     </el-dialog>
 
+    <!-- ── Modal: corregir servicio que refiere ── -->
+    <el-dialog v-model="modalServicio" width="420px" class="accion-dialog" :show-close="false" align-center append-to-body>
+      <template v-if="servicioSolicitud">
+        <div class="detalle-content">
+          <button type="button" class="detalle-close-btn" @click="modalServicio = false">
+            <component :is="XIcon" class="w-4 h-4" />
+          </button>
+          <div class="detalle-head">
+            <div class="detalle-head-pattern"></div>
+            <div class="detalle-head-icon accion-icon-info">
+              <component :is="PencilIcon" class="w-6 h-6" />
+            </div>
+            <div class="detalle-head-info">
+              <p class="detalle-head-title">Corregir servicio</p>
+              <p class="detalle-head-sub">{{ nombreCompleto(servicioSolicitud) }}</p>
+            </div>
+          </div>
+          <div class="detalle-body">
+            <div class="detalle-card">
+              <div class="card-body accion-form-body">
+                <label class="accion-field-label">Servicio que refiere <span class="accion-required">*</span></label>
+                <el-input v-model="servicioTexto" placeholder="Ej: HOSPITALIZACIÓN" maxlength="150" @keyup.enter="guardarServicio" />
+                <p class="accion-field-hint">Antes: «{{ servicioSolicitud.servicio_remision || servicioSolicitud.servicio_ubicacion_actual || '—' }}». Se guarda en mayúsculas.</p>
+              </div>
+            </div>
+          </div>
+          <div class="detalle-footer">
+            <button type="button" class="accion-cancelar-btn" @click="modalServicio = false">Cancelar</button>
+            <button type="button" class="accion-confirmar-btn accion-confirmar-success" :disabled="guardandoServicio || !servicioTexto.trim()" @click="guardarServicio">
+              <component :is="guardandoServicio ? Loader2Icon : CheckIcon" class="w-3.5 h-3.5" :class="{ 'animate-spin': guardandoServicio }" />
+              Guardar
+            </button>
+          </div>
+        </div>
+      </template>
+    </el-dialog>
+
   </div>
 </template>
 
@@ -1542,8 +1585,11 @@ import {
   MessageSquare as MessageIcon,
   MonitorSmartphone as MonitorSmartphoneIcon,
   StickyNote as StickyNoteIcon,
+  Pencil as PencilIcon,
+  Trash2 as Trash2Icon,
 } from '@lucide/vue';
 import http from '@/plugins/axios';
+import { ElMessageBox } from 'element-plus';
 import { exportarSolicitudesExcel } from '@/lib/exportarSolicitudesExcel';
 import StatCard from '@/components/ui/StatCard.vue';
 import DateRangeFilter from '@/components/ui/DateRangeFilter.vue';
@@ -2503,6 +2549,25 @@ function horaActual(): string {
   return `${h}:${m}`;
 }
 
+async function eliminarSolicitud(s: Solicitud) {
+  try {
+    await ElMessageBox.confirm(
+      `Se eliminará la solicitud de ${nombreCompleto(s)} (${idInterno(s.id)}). Sale de la tabla y de los informes — úsalo solo para registros de prueba o radicados por error.`,
+      'Eliminar solicitud',
+      { confirmButtonText: 'Eliminar', cancelButtonText: 'Cancelar', type: 'warning' }
+    );
+  } catch {
+    return;
+  }
+  try {
+    const { data } = await http.post(`/api/solicitudes-referencia/${s.id}/eliminar`);
+    solicitudes.value = solicitudes.value.filter(x => x.id !== s.id);
+    notify.success(data.message || 'Solicitud eliminada');
+  } catch (e: any) {
+    notify.error(e.response?.data?.message || 'No se pudo eliminar la solicitud');
+  }
+}
+
 function manejarAccionFila(comando: string, s: Solicitud) {
   const acciones: Record<string, (s: Solicitud) => void> = {
     aceptar: abrirAceptar,
@@ -2511,6 +2576,7 @@ function manejarAccionFila(comando: string, s: Solicitud) {
     cambiar: abrirCambiar,
     nota: abrirNota,
     evolucion: solicitarEvolucion,
+    eliminar: eliminarSolicitud,
   };
   acciones[comando]?.(s);
 }
@@ -2848,6 +2914,36 @@ async function cambiarEstado() {
     notify.error(e.response?.data?.message || 'Error al cambiar el estado');
   } finally {
     procesando.value = false;
+  }
+}
+
+/* ── Corregir servicio que refiere ── */
+const modalServicio = ref(false);
+const servicioSolicitud = ref<Solicitud | null>(null);
+const servicioTexto = ref('');
+const guardandoServicio = ref(false);
+
+function abrirEditarServicio(s: Solicitud) {
+  servicioSolicitud.value = s;
+  servicioTexto.value = s.servicio_remision || s.servicio_ubicacion_actual || '';
+  modalServicio.value = true;
+}
+
+async function guardarServicio() {
+  if (!servicioSolicitud.value || !servicioTexto.value.trim()) return;
+  try {
+    guardandoServicio.value = true;
+    const { data } = await http.post(`/api/solicitudes-referencia/${servicioSolicitud.value.id}/servicio`, {
+      servicio_remision: servicioTexto.value.trim(),
+    });
+    notify.success(data.message || 'Servicio actualizado');
+    const idx = solicitudes.value.findIndex(x => x.id === servicioSolicitud.value!.id);
+    if (idx !== -1) solicitudes.value[idx] = { ...solicitudes.value[idx], ...data.data };
+    modalServicio.value = false;
+  } catch (e: any) {
+    notify.error(e.response?.data?.message || 'Error al actualizar el servicio');
+  } finally {
+    guardandoServicio.value = false;
   }
 }
 
@@ -4670,6 +4766,21 @@ usePolling(() => {
 :deep(.accion-dialog .el-dialog__header) { display: none; }
 :deep(.accion-dialog .el-dialog__body) { padding: 0; overflow: hidden; }
 
+.sol-servicio-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px; height: 16px;
+  margin-left: 4px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: all .15s ease;
+}
+.sol-servicio-edit:hover { background: #dbeafe; color: #1d55ad; }
 .accion-icon-success { background: linear-gradient(135deg, #22c55e, #16a34a); box-shadow: 0 6px 16px rgba(22,163,74,.3); }
 .accion-icon-danger { background: linear-gradient(135deg, #ef4444, #dc2626); box-shadow: 0 6px 16px rgba(220,38,38,.3); }
 .accion-icon-info { background: linear-gradient(135deg, #3b82f6, #2563eb); box-shadow: 0 6px 16px rgba(37,99,235,.3); }

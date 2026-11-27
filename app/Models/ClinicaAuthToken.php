@@ -18,7 +18,7 @@ class ClinicaAuthToken extends Model
 
     protected $casts = [
         'expires_at' => 'datetime',
-        'used_at'    => 'datetime',
+        'used_at' => 'datetime',
     ];
 
     public function clinica(): BelongsTo

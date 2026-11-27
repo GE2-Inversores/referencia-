@@ -131,6 +131,29 @@ class LugarSinDisponibilidadTest extends TestCase
         $this->assertNull($solicitud->fresh()->tiempo_llegada_horas);
     }
 
+    public function test_corrige_el_servicio_que_refiere_en_mayusculas_y_lo_audita(): void
+    {
+        $staff = $this->staff();
+        $solicitud = $this->solicitud($staff);
+
+        $this->actingAs($staff)
+            ->postJson("/api/solicitudes-referencia/{$solicitud->id}/servicio", [
+                'servicio_remision' => 'hospitalización ',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.servicio_remision', 'HOSPITALIZACIÓN');
+
+        $this->assertSame('HOSPITALIZACIÓN', $solicitud->fresh()->servicio_remision);
+        $this->assertDatabaseHas('solicitud_referencia_eventos', [
+            'solicitud_referencia_id' => $solicitud->id,
+            'tipo' => 'nota',
+        ]);
+
+        $this->actingAs($staff)
+            ->postJson("/api/solicitudes-referencia/{$solicitud->id}/servicio", ['servicio_remision' => ''])
+            ->assertUnprocessable();
+    }
+
     public function test_el_correo_sin_cupo_no_lleva_el_lugar_y_el_del_codigo_si(): void
     {
         $staff = $this->staff();
@@ -158,5 +181,27 @@ class LugarSinDisponibilidadTest extends TestCase
 
         $this->assertSame('en_espera', $solicitud->fresh()->estado);
         $this->assertStringContainsString(self::LUGAR, $this->ultimoCorreoHtml());
+    }
+
+    public function test_eliminar_hace_borrado_logico_y_bloquea_completadas(): void
+    {
+        $staff = $this->staff();
+        $solicitud = $this->solicitud($staff);
+
+        $this->actingAs($staff)
+            ->postJson("/api/solicitudes-referencia/{$solicitud->id}/eliminar")
+            ->assertOk();
+
+        $this->assertSoftDeleted('solicitudes_referencia', ['id' => $solicitud->id]);
+        $this->assertNull(SolicitudReferencia::find($solicitud->id));
+        $this->assertNotNull(SolicitudReferencia::withTrashed()->find($solicitud->id));
+
+        $completada = $this->solicitud($staff);
+        $completada->update(['estado' => 'completado']);
+
+        $this->actingAs($staff)
+            ->postJson("/api/solicitudes-referencia/{$completada->id}/eliminar")
+            ->assertStatus(422);
+        $this->assertNotNull(SolicitudReferencia::find($completada->id));
     }
 }

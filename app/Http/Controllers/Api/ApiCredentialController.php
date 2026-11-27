@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Http\Controllers\Api\BaseController;
 use App\Http\Requests\ApiCredentialRequest;
 use App\Http\Resources\ApiCredentialResource;
 use App\Models\ApiCredential;
